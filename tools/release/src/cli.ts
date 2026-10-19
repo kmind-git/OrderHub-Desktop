@@ -24,6 +24,13 @@ interface ParsedArgs {
 }
 
 const BOOLEAN_FLAGS = new Set(["json", "publish", "help"]);
+const invocationCwd = process.env.INIT_CWD ?? process.cwd();
+
+/** Resolve user-supplied paths against the directory the command was invoked
+ * from, not the workspace package directory that pnpm changes into. */
+function userPath(value: string): string {
+  return resolve(invocationCwd, value);
+}
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0] ?? "help";
@@ -118,10 +125,8 @@ function print(value: unknown, asJson: boolean): void {
 }
 
 async function buildRegistrationFromFile(args: ParsedArgs): Promise<ReleaseRegistration> {
-  const file = resolve(requireFlag(args, "file"));
-  const signatureFile = resolve(
-    flag(args, "signature") ?? `${file}.sig`,
-  );
+  const file = userPath(requireFlag(args, "file"));
+  const signatureFile = userPath(flag(args, "signature") ?? `${file}.sig`);
   const signature = readFileSync(signatureFile, "utf8").trim();
   const sha256 = await sha256File(file);
   const size = statSync(file).size;
@@ -146,7 +151,7 @@ async function buildRegistrationFromFile(args: ParsedArgs): Promise<ReleaseRegis
 
 async function registerCommand(client: ApiClient, args: ParsedArgs): Promise<void> {
   const registration = flag(args, "manifest")
-    ? readManifest(resolve(requireFlag(args, "manifest")))
+    ? readManifest(userPath(requireFlag(args, "manifest")))
     : await buildRegistrationFromFile(args);
   const release = await client.request<ReleaseSummary>(apiPaths.adminReleases, {
     method: "POST",
@@ -254,9 +259,9 @@ async function main(): Promise<void> {
   }
   if (args.command === "stage") {
     const staged = await stageArtifact({
-      file: requireFlag(args, "file"),
-      signatureFile: flag(args, "signature"),
-      artifactRoot: requireFlag(args, "artifact-root"),
+      file: userPath(requireFlag(args, "file")),
+      signatureFile: flag(args, "signature") ? userPath(flag(args, "signature")!) : undefined,
+      artifactRoot: userPath(requireFlag(args, "artifact-root")),
       publicBaseUrl: requireFlag(args, "public-base-url"),
       application: flag(args, "application") ?? "com.orderhub.desktop",
       version: requireFlag(args, "version"),
@@ -267,9 +272,9 @@ async function main(): Promise<void> {
       installer: (flag(args, "installer") ?? "nsis") as "nsis",
     });
     const out = flag(args, "out");
-    const result = out ? writeManifest(staged, resolve(out)) : staged;
+    const result = out ? writeManifest(staged, userPath(out)) : staged;
     if (out) {
-      console.log(`manifest: ${resolve(out)}`);
+      console.log(`manifest: ${userPath(out)}`);
     }
     console.log(`artifact: ${result.artifactPath}`);
     console.log(JSON.stringify(result.manifest, null, 2));

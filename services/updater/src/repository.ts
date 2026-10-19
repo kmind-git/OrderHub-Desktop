@@ -148,18 +148,26 @@ function validateArtifactUrl(url: string, config: UpdaterConfig): void {
 }
 
 function validateSignature(signature: string): void {
-  const lines = signature
+  const trimmed = signature.trim();
+  // Tauri v2's updater `.sig` is a single base64 blob. Older/minisign tooling
+  // can emit the full multi-line "untrusted comment" form; accept both.
+  const singleLine = trimmed.replace(/\s+/g, "");
+  if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && singleLine.length >= 80) {
+    return;
+  }
+  const lines = trimmed
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
   const base64Lines = lines.filter((line) => /^[A-Za-z0-9+/=]{40,}$/.test(line));
-  if (lines.length < 2 || base64Lines.length < 2) {
-    throw new AppError(
-      400,
-      "INVALID_SIGNATURE",
-      "Artifact signature must be the complete Tauri/minisign signature text (.sig), not a URL.",
-    );
+  if (lines.length >= 2 && base64Lines.length >= 2) {
+    return;
   }
+  throw new AppError(
+    400,
+    "INVALID_SIGNATURE",
+    "Artifact signature must be the complete Tauri/minisign signature text (.sig), not a URL.",
+  );
 }
 
 export function registerRelease(

@@ -39,12 +39,13 @@ pnpm --filter @orderhub/updater test
 
 ```text
 Test Files  2 passed (2)
-     Tests  11 passed (11)
+     Tests  12 passed (12)
 ```
 
 覆盖：health/ready、admin 认证、发布/暂停/撤回、revision 冲突、stable/beta、灰度 0/100、
 最低版本强制、无升级路径 409、204/200、eligibility 410、事件幂等、危险 URL 拒绝、
-release CLI staging → register → publish → policy → updates → 包下载 → eligibility。
+Tauri v2 单行 base64 签名、release CLI staging → register → publish → policy → updates →
+包下载 → eligibility。
 
 ## 4. 发布工具
 
@@ -180,6 +181,19 @@ sha256 455ac77e910ec54b6750bf435eb9062b5c088fe4c397d8085f8bcc95fc7b8720
 [v0.1.0](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.0)。
 重新下载发布资产校验 SHA-256 与本地一致。首次尝试时 NSIS 下载曾超时，重试后成功；
 网络受限环境的处理见 [runbook](runbook.md#3-发布一个新版本)。
+
+## 9.2 真实 GitHub 发布物 → 更新服务
+
+用本地更新服务加载 `release-assets/release-manifest.json`（指向 GitHub Release v0.1.0 安装包）：
+
+- 注册 draft → publish → beta 通道 policy revision 1 / 100%；
+- `pnpm release check --channel beta --version 0.0.9` 返回 `update_available=true`，
+  `selected_release`、Tauri 标准 update 和 eligibility 的 URL/size/SHA-256 均与 GitHub 资产一致；
+- 包签名是 Tauri v2 单行 base64 `.sig`；首次注册暴露了服务端只接受 multiline 签名的问题，
+  已修复并增加单行签名回归测试；
+- 该环境 Node fetch 对 GitHub 资产 URL 的发布前 HEAD 检查失败，publish 测试使用
+  `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=0`；PowerShell/Curl `HEAD` 同一 URL 返回 200。
+  生产构建机应保持校验开启并验证出站访问。
 
 ## 10. 未执行
 

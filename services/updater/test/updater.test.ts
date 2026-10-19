@@ -331,6 +331,16 @@ describe("update service", () => {
     expect(invalid.status).toBe(400);
   });
 
+  it("accepts a real Tauri v2 single-line base64 signature", async () => {
+    const registrationWithSingleLineSignature = registration("0.2.2");
+    const singleLine = Buffer.alloc(336, 11).toString("base64");
+    registrationWithSingleLineSignature.artifacts[0]!.signature = singleLine;
+    const response = await admin(registrationWithSingleLineSignature, "/v1/admin/releases");
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { artifacts: Array<{ signature: string }> };
+    expect(body.artifacts[0]?.signature).toBe(singleLine);
+  });
+
   it("rejects missing installation identifiers and insecure artifact URLs", async () => {
     const missing = await app.request("/v1/update-policy/beta/windows/x86_64/0.1.0?installer=nsis");
     expect(missing.status).toBe(400);
