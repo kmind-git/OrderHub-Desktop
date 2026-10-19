@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "createdDate": "2026-10-19",
+  "generationMode": "built-in image_gen",
+  "application": "OrderHub Desktop",
+  "assetSet": "orderhub-v1",
+  "status": "image-assets-ready; application-not-implemented",
+  "assets": [
+    {
+      "id": "connection-hero",
+      "file": "connection-hero.png",
+      "label": "连接页主视觉",
+      "usage": "连接设置、初次配置、关于页辅助视觉",
+      "cssWidth": "420–720px",
+      "background": "opaque",
+      "objectFit": "contain; 仅作为装饰面板时可受控 cover",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 1921613,
+      "pixelFormat": "Format24bppRgb",
+      "cornerAlpha": [
+        255,
+        255
+      ],
+      "sha256": "144ec04387ab5ce083320219c44108c9e965501a664f393f27903bb7914fd338",
+      "decorative": true,
+      "alt": "",
+      "animated": false,
+      "sourcePromptId": "connection-hero"
+    },
+    {
+      "id": "update-package",
+      "file": "update-package.png",
+      "label": "更新包插画",
+      "usage": "发现新版本、等待下载或安装的辅助说明",
+      "cssWidth": "200–280px",
+      "background": "transparent",
+      "objectFit": "contain",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 1296429,
+      "pixelFormat": "Format32bppArgb",
+      "cornerAlpha": [
+        0,
+        0
+      ],
+      "sha256": "52e46c992814bca3925628cb20b8e3ababdadfe2ab7ac03ee91b55db7bb03269",
+      "decorative": true,
+      "alt": "",
+      "animated": false,
+      "sourcePromptId": "update-package"
+    },
+    {
+      "id": "query-placeholder",
+      "file": "query-placeholder.png",
+      "label": "查询预留页插画",
+      "usage": "后台暂未提供查询接口、模块尚未接入",
+      "cssWidth": "180–240px",
+      "background": "transparent",
+      "objectFit": "contain",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 1149666,
+      "pixelFormat": "Format32bppArgb",
+      "cornerAlpha": [
+        0,
+        0
+      ],
+      "sha256": "a0e001b7aaab03a2eeb1cbc912743e65fedeb0e98054481cf6fb34397a519c6c",
+      "decorative": true,
+      "alt": "",
+      "animated": false,
+      "sourcePromptId": "query-placeholder"
+    },
+    {
+      "id": "connection-recovery",
+      "file": "connection-recovery-v2.png",
+      "label": "连接恢复插画",
+      "usage": "连接中断、重连或状态重新同步",
+      "cssWidth": "280–360px",
+      "background": "transparent",
+      "objectFit": "contain",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 590691,
+      "pixelFormat": "Format32bppArgb",
+      "cornerAlpha": [
+        0,
+        0
+      ],
+      "sha256": "4f54b52d9f7b12d5a641413d61c98ac28b36b467a60a8f825567577d83a453f3",
+      "decorative": true,
+      "alt": "",
+      "animated": false,
+      "sourcePromptId": "connection-recovery"
+    }
+  ],
+  "excludedDrafts": [
+    "drafts/connection-recovery-v1.png"
+  ],
+  "promptRecord": "generation-record.json",
+  "verification": {
+    "imageContent": "visually inspected",
+    "dimensions": "checked",
+    "transparency": "RGB hero; actual alpha channel on three illustrations; transparent corners confirmed",
+    "browserRendering": "not verified: Chrome unavailable and built-in browser blocked file URLs",
+    "applicationIntegration": "not implemented"
+  }
+}

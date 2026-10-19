@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OrderHub Desktop",
+  "version": "0.1.0",
+  "identifier": "com.orderhub.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev:web",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OrderHub Desktop",
+        "width": 1160,
+        "height": 760,
+        "minWidth": 1000,
+        "minHeight": 660,
+        "resizable": true,
+        "maximized": false,
+        "fullscreen": false,
+        "theme": "Dark",
+        "backgroundColor": "#0b1013"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' customprotocol: asset:; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' customprotocol: asset: http://localhost:1420; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "publisher": "OrderHub",
+    "copyright": "Copyright OrderHub",
+    "category": "Finance",
+    "shortDescription": "OrderHub desktop trading client",
+    "longDescription": "OrderHub Desktop connects to the OrderHub gRPC service with native TLS, shows authorized strategy state, submits limit orders and cancellations, and updates through signed full installers.",
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2QUJGNTQwQ0MwQTAyNkQKUldSdEFnck1RUFdyRnRiQm9LUDdjeUZIV0ZHYmNXYmx3OVhJNmdzYlJEWjVXMzd3cXUvQ2VRdzYK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

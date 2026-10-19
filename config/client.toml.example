@@ -1,0 +1,40 @@
+# Example configuration. Never place real tokens in source control.
+# Paths are relative to this config directory.
+
+[connection]
+address = "orderhub.example.com:50051"
+tls_domain = "orderhub.example.com"
+ca_file = "tls/ca.pem"
+token_file = "tls/client-token.txt"
+connect_timeout_secs = 5
+rpc_timeout_secs = 10
+
+# Defaults used only to prefill the explicit order form; the native layer
+# still validates against the Snapshot instrument info.
+[order]
+strategy_id = "ORDERHUB-S001"
+instrument_id = "AAPL.GOX"
+side = "BUY"
+quantity = "1"
+price = "153.22"
+time_in_force = "DAY"
+
+[watch]
+timeout_secs = 15
+
+# Optional update service. When base_url is absent the MVP runs in development
+# mode: update checking is disabled and the minimum-version gate is not
+# enforced. A deployed client must configure this section.
+[update]
+# base_url = "https://updates.example.com"
+channel = "stable"
+auto_check = true
+auto_download = false
+enforce_min_version = true
+# Only for a loopback development service; never for production.
+allow_insecure_loopback = false
+check_interval_secs = 3600
+
+[logging]
+directory = "../logs"
+debug = false

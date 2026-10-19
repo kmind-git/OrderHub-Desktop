@@ -1,0 +1,252 @@
+{
+  "generated_at_utc": "2026-10-18T13:02:32.970Z",
+  "package": "orderhub.v1",
+  "service": "orderhub.v1.OrderHub",
+  "source_revision": "6829a346a8fd44f0c825fbd9476d39c72fa78ec1",
+  "proto_source_sha256": "1011db4a1d944e6203225b4637669923f062659577782c11f32b4338fb2f94b4",
+  "rpcs": [
+    {
+      "path": "/orderhub.v1.OrderHub/SubmitOrder",
+      "input": "SubmitOrderRequest",
+      "output": "AdmissionResponse",
+      "server_streaming": false
+    },
+    {
+      "path": "/orderhub.v1.OrderHub/CancelOrder",
+      "input": "CancelOrderRequest",
+      "output": "AdmissionResponse",
+      "server_streaming": false
+    },
+    {
+      "path": "/orderhub.v1.OrderHub/GetState",
+      "input": "GetStateRequest",
+      "output": "GetStateResponse",
+      "server_streaming": false
+    },
+    {
+      "path": "/orderhub.v1.OrderHub/WatchEvents",
+      "input": "WatchEventsRequest",
+      "output": "JournalEvent",
+      "server_streaming": true
+    }
+  ],
+  "messages": 21,
+  "documented_fields": 117,
+  "protocol_validation": {
+    "examples": [
+      {
+        "bytes": 5,
+        "file": "snapshot-request.json",
+        "message": "GetStateRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 24,
+        "file": "snapshot-next-request.json",
+        "message": "GetStateRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 325,
+        "file": "snapshot-response.example.json",
+        "message": "GetStateResponse",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 96,
+        "file": "submit-request.json",
+        "message": "SubmitOrderRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 109,
+        "file": "submit-before-request.json",
+        "message": "SubmitOrderRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 71,
+        "file": "submit-response.example.json",
+        "message": "AdmissionResponse",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 85,
+        "file": "cancel-request.json",
+        "message": "CancelOrderRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 85,
+        "file": "cancel-response.example.json",
+        "message": "AdmissionResponse",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 74,
+        "file": "order-lookup-request.json",
+        "message": "GetStateRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 63,
+        "file": "request-lookup-request.json",
+        "message": "GetStateRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 122,
+        "file": "request-lookup-response.example.json",
+        "message": "GetStateResponse",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 50,
+        "file": "watch-request.json",
+        "message": "WatchEventsRequest",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 444,
+        "file": "execution-event.example.json",
+        "message": "JournalEvent",
+        "protobuf_roundtrip": true
+      },
+      {
+        "bytes": 66,
+        "file": "progress-event.example.json",
+        "message": "JournalEvent",
+        "protobuf_roundtrip": true
+      }
+    ],
+    "network_calls": 0,
+    "proto_compile": "passed"
+  },
+  "example_placeholders_are_not_live_values": true,
+  "remote_rpc_executed": false,
+  "orders_submitted": 0,
+  "source_files": [
+    {
+      "path": "crates/orderhub-proto/proto/orderhub.proto",
+      "sha256": "1011db4a1d944e6203225b4637669923f062659577782c11f32b4338fb2f94b4"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/grpc.rs",
+      "sha256": "f6bef9433ff99d40d675811891750680fff9af66f59bc28743efcd4d3ccd4018"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/auth.rs",
+      "sha256": "2ce4dc429a7feaf9da63c7ab6d00091bada3313efd6f75187551c3f0f90f6a87"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/views.rs",
+      "sha256": "070a21d63b94e316cc9b232cbffba1d7e084b6e17937e92f2cd6650b00c5daff"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/bridge.rs",
+      "sha256": "bb3d6e3c0bc9e093b97180e6f45867917603127e9ac855ababad69947719c1e0"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/inputs.rs",
+      "sha256": "e84a048f91b10a6b72ae983ce145ced3a6872b51a06082c5a7be22b07cb7a6a1"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/ledger.rs",
+      "sha256": "b9e8529ed2591812cb7c1d5dec67cfad9bb5214bf1401b0b18f6051ab567d804"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/journal.rs",
+      "sha256": "0f4b783f79ec2e850e3ae2288044e57075af22638c57449c441ea59f86a66bca"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/readiness.rs",
+      "sha256": "6ddfd461ad00c7985b498c71eb8a5e6c227d7e4d1aed5e24a02aef5513a3bf48"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/transport.rs",
+      "sha256": "44651ffe97d326417b29df60410a6197024950a76de7e6f8186b2976185dc723"
+    },
+    {
+      "path": "crates/orderhub-gateway/src/persistence.rs",
+      "sha256": "560fd0993dc034ac9f154fec53f5f8219646c0cceb0efdb559058ee2534bc656"
+    },
+    {
+      "path": "crates/orderhub-node/src/main.rs",
+      "sha256": "5d735c6f4d264545747a6691a22053836b0c9ae9d5ec068d253bf4fcd605d34b"
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "e2c3ef4ec4965dd3778fc0cbfa869aa72421d8ce5b75e7917bc33ce121b2c897"
+    },
+    {
+      "path": "OrderHub-gRPC接口文档.md",
+      "sha256": "98986a2b407d3cb948ca8fba60b4ff7d6ca7e0526d713320d89b7e4bc786b7db"
+    },
+    {
+      "path": "proto/orderhub.proto",
+      "sha256": "1011db4a1d944e6203225b4637669923f062659577782c11f32b4338fb2f94b4"
+    },
+    {
+      "path": "examples/index.json",
+      "sha256": "79e1b4a288a94a8da0d7afd42865e5f97eefb32011796f96e76d11c49ed92098"
+    },
+    {
+      "path": "examples/snapshot-request.json",
+      "sha256": "4216c6736393108bed6080319f933b0c2232ed500a434be565162b55d9911cdf"
+    },
+    {
+      "path": "examples/snapshot-next-request.json",
+      "sha256": "67348b09d7a03dbe13a55c0c254a8f00116dcd0e27b0ad7ba3c66cf5d8721184"
+    },
+    {
+      "path": "examples/snapshot-response.example.json",
+      "sha256": "ec8a83d064eb5129801117b192748526021883e602a7dec5e4e726555befa126"
+    },
+    {
+      "path": "examples/submit-request.json",
+      "sha256": "57dbe098e93d7e7080bc4ff1f44548391cc5475aaa75a53f950e1063f7b07b3e"
+    },
+    {
+      "path": "examples/submit-before-request.json",
+      "sha256": "e5ad64298102a3bc7cb3fc42f1f9750ea0051859642db5664701fd3cb9aeb398"
+    },
+    {
+      "path": "examples/submit-response.example.json",
+      "sha256": "cb97cfe9b8354f9b117521ea359c9fc6d8c8a1322c370beba30b716b31f855fc"
+    },
+    {
+      "path": "examples/cancel-request.json",
+      "sha256": "2f7be2fe3110e75aa637c0084f681c518b1ccead32ef8be80734ced8ce59f278"
+    },
+    {
+      "path": "examples/cancel-response.example.json",
+      "sha256": "b08ea5a837751e8e9a87add05b8864e201a3f9cf459063794c70262f54641253"
+    },
+    {
+      "path": "examples/order-lookup-request.json",
+      "sha256": "e571d67a9fe34fac526f726fe35c4fd2f8badb436e93bcceb33935545719f3de"
+    },
+    {
+      "path": "examples/request-lookup-request.json",
+      "sha256": "00281ee43a7fc6ed12081f620502c672c81a7a99b82ce5030844071762cfc82f"
+    },
+    {
+      "path": "examples/request-lookup-response.example.json",
+      "sha256": "149c838c8965f367ed9e4572728e57a2ea5556209a0743f6dceba8a2d18eb96f"
+    },
+    {
+      "path": "examples/watch-request.json",
+      "sha256": "ed5d7471ed89d709008a36f083140c6a656c9a1c04d4f7eef80f69e49811c2d9"
+    },
+    {
+      "path": "examples/execution-event.example.json",
+      "sha256": "17d2c7a49e9b573fd12d2ca6b109ef87aa185ef2b6c3bc16b893fb31233f292c"
+    },
+    {
+      "path": "examples/progress-event.example.json",
+      "sha256": "cdeba5d461c233bb3fa0b1405d4ccfc063721d29a85990fba0c571aa5883949e"
+    }
+  ]
+}

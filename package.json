@@ -1,0 +1,31 @@
+{
+  "name": "orderhub-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OrderHub Desktop MVP — Tauri 2 client, Hono update service, shared contracts",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @orderhub/desktop dev",
+    "dev:tauri": "pnpm --filter @orderhub/desktop dev:tauri",
+    "build": "pnpm --filter @orderhub/contracts build && pnpm --filter @orderhub/updater build && pnpm --filter @orderhub/desktop build",
+    "build:web": "pnpm --filter @orderhub/desktop build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @orderhub/contracts test && pnpm --filter @orderhub/release test && pnpm --filter @orderhub/updater test && pnpm --filter @orderhub/desktop test",
+    "test:contracts": "pnpm --filter @orderhub/contracts test",
+    "test:updater": "pnpm --filter @orderhub/updater test",
+    "test:release": "pnpm --filter @orderhub/release test",
+    "test:web": "pnpm --filter @orderhub/desktop test",
+    "test:rust": "cd apps/desktop/src-tauri && cargo test",
+    "openapi": "pnpm --filter @orderhub/contracts openapi",
+    "updater:dev": "pnpm --filter @orderhub/updater dev",
+    "updater:start": "pnpm --filter @orderhub/updater start",
+    "release": "pnpm --filter @orderhub/release cli",
+    "desktop:tauri": "pnpm --filter @orderhub/desktop tauri"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
