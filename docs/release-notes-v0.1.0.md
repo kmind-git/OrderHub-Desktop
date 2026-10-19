@@ -34,5 +34,11 @@
 
 ## 校验
 
-安装包 SHA-256 记录在 `SHA256SUMS.txt` 和 `release-manifest.json` 中。发布资产是完整安装包，
-不是差分包；更新时由 Tauri updater 校验 `.sig`。
+安装包 SHA-256：
+
+```text
+455ac77e910ec54b6750bf435eb9062b5c088fe4c397d8085f8bcc95fc7b8720  OrderHub-Desktop_0.1.0_x64-setup.exe
+```
+
+同时记录在 `SHA256SUMS.txt` 和 `release-manifest.json` 中。发布资产是完整安装包，不是
+差分包；更新时由 Tauri updater 校验 `.sig`。

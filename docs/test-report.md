@@ -168,15 +168,23 @@ pnpm --filter @orderhub/desktop tauri build --no-bundle
 结果：release 二进制成功生成于
 `apps/desktop/src-tauri/target/release/orderhub-desktop.exe`（约 21.7 MB）。
 
-尝试带 `--config src-tauri/tauri.update.conf.json` 生成 NSIS + updater artifacts 时，
-Tauri bundler 在从 GitHub 下载 `nsis-3.13.zip` 阶段返回 `failed to bundle project:
-timeout: global`；release 二进制本身已编译成功。该环境未完成安装包生成，需在可访问
-GitHub/内网镜像的构建机重试，详见 [runbook](runbook.md#3-发布一个新版本)。
+带 `--config src-tauri/tauri.update.conf.json` 生成 NSIS + updater artifacts 成功：
+
+```text
+OrderHub Desktop_0.1.0_x64-setup.exe       8.30 MiB
+OrderHub Desktop_0.1.0_x64-setup.exe.sig   448 bytes
+sha256 455ac77e910ec54b6750bf435eb9062b5c088fe4c397d8085f8bcc95fc7b8720
+```
+
+安装包以无空格文件名上传到 GitHub 预发布：
+[v0.1.0](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.0)。
+重新下载发布资产校验 SHA-256 与本地一致。首次尝试时 NSIS 下载曾超时，重试后成功；
+网络受限环境的处理见 [runbook](runbook.md#3-发布一个新版本)。
 
 ## 10. 未执行
 
 - 真实报单/撤单、超时、撤单竞争、epoch 迁移；
-- 签名 NSIS 的安装/升级/卸载与 0.1.0 → 0.2.0 重启（本环境 NSIS 下载被阻断）；
+- 已构建签名 NSIS，但 v0.1.0 安装/卸载与 0.1.0 → 0.2.0 升级重启尚未在干净 Windows 环境执行；
 - 篡改包/错签名/撤回包的实际 Tauri 安装器拒绝；
 - 两台客户端灰度分桶与最低版本强制；
 - SQLite + 安装包备份恢复演练。

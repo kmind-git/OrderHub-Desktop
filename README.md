@@ -1,5 +1,8 @@
 # OrderHub Desktop MVP
 
+[GitHub 仓库](https://github.com/kmind-git/OrderHub-Desktop) ·
+[预发布 v0.1.0](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.0)
+
 OrderHub Desktop 是面向 Windows x64 的桌面客户端 MVP：React + TypeScript + Vite 界面，
 Tauri 2 / Rust 原生层连接现有 `orderhub.v1` gRPC 服务，独立 Hono + SQLite 更新服务负责
 版本策略、灰度、发布元数据和 Tauri updater 响应。
@@ -35,6 +38,16 @@ assets/images/           已生成的四张装饰图及素材记录
 test-artifacts/          测试包、签名归档、脱敏验证输出（运行时数据不入库）
 docs/                    MVP 方案、实现、安全、部署与验收记录
 ```
+
+## 下载测试安装包
+
+从 [GitHub Release v0.1.0](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.0)
+下载 Windows x64 NSIS 安装包、`.sig`、`SHA256SUMS.txt` 和
+[release-manifest.json](https://github.com/kmind-git/OrderHub-Desktop/releases/download/v0.1.0/release-manifest.json)。
+
+> 这是内部试装预发布版本，使用测试 updater 签名密钥，未做 Authenticode 签名；安装包不包含
+> 业务配置或凭证。运行前必须提供 `config/` 或设置 `ORDERHUB_CONFIG_DIR`。详见
+> [发布说明](docs/release-notes-v0.1.0.md)。
 
 ## 快速开始
 
