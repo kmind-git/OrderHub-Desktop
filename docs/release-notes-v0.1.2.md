@@ -40,6 +40,14 @@ $env:ORDERHUB_UPDATER_ADMIN_TOKEN = '<admin-token>'
 node services/updater/dist/server.js
 ```
 
+## 更新服务部署包
+
+更新服务是独立 Node 进程，不属于桌面安装包。部署包在单独 Release：
+
+[OrderHub Update Service v0.1.2](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/updater-v0.1.2)
+
+下载 `OrderHub-Updater-0.1.2.zip`，按包内 README 启动。
+
 ## 安全边界
 
 HTTP 会明文传输安装包、签名、版本信息和 `X-Installation-ID`，不传输业务 Bearer Token。
