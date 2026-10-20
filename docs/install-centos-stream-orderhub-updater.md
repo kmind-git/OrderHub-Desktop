@@ -236,13 +236,3 @@ curl -fsS http://8.159.158.144:8787/readyz
 ```
 
 如果本机成功、远端失败，检查 `ORDERHUB_UPDATER_HOST=0.0.0.0` 和防火墙 8787。
-
-## 9. 常用运维命令
-
-```bash
-sudo systemctl status orderhub-updater --no-pager
-sudo systemctl restart orderhub-updater
-sudo journalctl -u orderhub-updater -f
-```
-
-更新服务使用纯 HTTP，仅应在受信内网使用，不要暴露到公网。
