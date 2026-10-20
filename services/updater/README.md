@@ -18,13 +18,18 @@ node dist/server.js
 默认 `http://127.0.0.1:8787`。开发时 `ORDERHUB_UPDATER_SERVE_ARTIFACTS=1` 可直接从
 `/artifacts/*` 提供测试包；生产建议关闭并由反向代理/文件服务承担下载。
 
+`pnpm --filter @orderhub/updater build` 现在输出自包含的 `dist/server.js`（除 Node 内置
+模块外无运行时依赖）。GitHub Release `updater-v0.1.2` 提供包含 `dist/`、`migrations/`、
+`.env.example` 和 `start.ps1` 的部署包。
+
 ## 环境变量
 
 | 变量 | 说明 |
 | --- | --- |
 | `ORDERHUB_UPDATER_DB` | SQLite 路径；WAL、外键、busy_timeout |
 | `ORDERHUB_UPDATER_ARTIFACT_DIR` | 安装包目录 |
-| `ORDERHUB_UPDATER_PUBLIC_BASE_URL` | 包下载公共前缀；生产必须 HTTPS |
+| `ORDERHUB_UPDATER_PUBLIC_BASE_URL` | 包下载公共前缀；默认必须 HTTPS |
+| `ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL` | 显式允许非回环 HTTP 包地址（仅受信内网） |
 | `ORDERHUB_UPDATER_ADMIN_TOKEN` | 管理 API Bearer Token；未配置时管理接口 503 |
 | `ORDERHUB_UPDATER_APP_ID` | 应用标识，默认 `com.orderhub.desktop` |
 | `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL` | 发布前检查包 URL 可读，默认 1 |
