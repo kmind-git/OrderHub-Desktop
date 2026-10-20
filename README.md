@@ -68,7 +68,9 @@ vi .env
 
 部署包包含自包含的 `dist/server.js`、`migrations/`、`.env.example`、`start.sh` 和
 `orderhub-updater.service`，不需要 `node_modules`。需要 Node.js 22.13+，默认监听
-`0.0.0.0:8787`，健康检查 `/healthz`、`/readyz`。详细步骤见包内 `README.md`。
+`0.0.0.0:8787`，健康检查 `/healthz`、`/readyz`。按你的
+`orderhub-updater` 用户和 `/home/orderhub-updater` 家目录整理的逐步安装文档见
+[CentOS Stream 安装步骤](docs/install-centos-stream-orderhub-updater.md)。
 
 ## 快速开始
 
