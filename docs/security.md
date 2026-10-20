@@ -44,6 +44,16 @@
   更新域名。
 - 前端图片全部本地打包，不加载远程图片；装饰图 `alt=""`，状态由可访问文本表达。
 
+### 3.1 更新服务 HTTP（v0.1.2，仅受信内网）
+
+- 默认仍只接受 HTTPS；HTTP 必须同时满足：
+  - 客户端 `[update].allow_insecure_http = true`；
+  - 构建配置 `dangerousInsecureTransportProtocol = true`；
+  - 服务端 `ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL=1`。
+- HTTP 会明文暴露安装包、更新签名、版本策略和 `X-Installation-ID`；业务 Bearer Token
+  不会发送给更新服务。只允许在受控内网和防火墙白名单下使用。
+- 公网或不可信网络应恢复 HTTPS，并关闭上述三个开关。
+
 ## 4. 更新安全
 
 - Tauri updater 公钥内置于 `tauri.conf.json`；当前仓库内置的是**测试密钥**公钥，对应私钥在

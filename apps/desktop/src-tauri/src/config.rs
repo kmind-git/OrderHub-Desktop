@@ -63,6 +63,7 @@ pub struct UpdateSettings {
     pub auto_download: bool,
     pub enforce_min_version: bool,
     pub allow_insecure_loopback: bool,
+    pub allow_insecure_http: bool,
     pub check_interval_secs: u64,
 }
 
@@ -76,6 +77,7 @@ impl UpdateSettings {
             auto_download: false,
             enforce_min_version: false,
             allow_insecure_loopback: false,
+            allow_insecure_http: false,
             check_interval_secs: 3600,
         }
     }
@@ -159,6 +161,8 @@ struct RawUpdate {
     enforce_min_version: bool,
     #[serde(default)]
     allow_insecure_loopback: bool,
+    #[serde(default)]
+    allow_insecure_http: bool,
     #[serde(default = "default_check_interval")]
     check_interval_secs: u64,
 }
@@ -345,15 +349,23 @@ fn validate_tls_domain(domain: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_update_url(value: &str, allow_insecure_loopback: bool) -> Result<Url, String> {
+fn validate_update_url(
+    value: &str,
+    allow_insecure_loopback: bool,
+    allow_insecure_http: bool,
+) -> Result<Url, String> {
     let parsed = Url::parse(value).map_err(|_| "更新服务地址不是有效 URL".to_string())?;
     let loopback = parsed
         .host_str()
         .map(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"))
         .unwrap_or(false);
     if parsed.scheme() != "https" {
-        if !(allow_insecure_loopback && loopback && parsed.scheme() == "http") {
-            return Err("更新服务地址必须使用 HTTPS（回环开发地址需显式允许）".into());
+        let allowed_http = parsed.scheme() == "http"
+            && (allow_insecure_http || (allow_insecure_loopback && loopback));
+        if !allowed_http {
+            return Err(
+                "更新服务地址必须使用 HTTPS（HTTP 需显式设置 update.allow_insecure_http）".into(),
+            );
         }
     }
     if parsed.query().is_some() || parsed.fragment().is_some() {
@@ -537,6 +549,7 @@ pub fn load_config(config_dir: PathBuf) -> LoadedConfig {
 
                     if let Some(raw_update) = &raw.update {
                         update.allow_insecure_loopback = raw_update.allow_insecure_loopback;
+                        update.allow_insecure_http = raw_update.allow_insecure_http;
                         update.channel = raw_update.channel.clone();
                         update.auto_check = raw_update.auto_check;
                         update.auto_download = raw_update.auto_download;
@@ -566,6 +579,7 @@ pub fn load_config(config_dir: PathBuf) -> LoadedConfig {
                             Some(base_url) => match validate_update_url(
                                 base_url,
                                 raw_update.allow_insecure_loopback,
+                                raw_update.allow_insecure_http,
                             ) {
                                 Ok(url) => {
                                     update.base_url =
@@ -647,6 +661,7 @@ fn update_summary(update: &UpdateSettings) -> UpdateConfigSummary {
         auto_download: update.auto_download,
         enforce_min_version: update.enforce_min_version,
         allow_insecure_loopback: update.allow_insecure_loopback,
+        allow_insecure_http: update.allow_insecure_http,
         check_interval_secs: update.check_interval_secs,
     }
 }
@@ -714,6 +729,38 @@ timeout_secs = 15
         assert!(debug.contains("Token(***)"));
         assert_eq!(config.credential_ref.len(), 16);
         assert_eq!(config.environment_id.len(), 16);
+    }
+
+    #[test]
+    fn http_update_url_requires_explicit_opt_in() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            "tls/ca.pem",
+            "test-token-123",
+            "[update]\nbase_url = \"http://192.0.2.10:8787\"\nchannel = \"beta\"\n",
+        );
+        let rejected = load_config(dir.path().to_path_buf());
+        assert!(!rejected.update.configured);
+        assert!(rejected
+            .summary
+            .issues
+            .iter()
+            .any(|issue| issue.code == "UPDATE_URL_INVALID"));
+
+        write_config(
+            dir.path(),
+            "tls/ca.pem",
+            "test-token-123",
+            "[update]\nbase_url = \"http://192.0.2.10:8787\"\nchannel = \"beta\"\nallow_insecure_http = true\n",
+        );
+        let allowed = load_config(dir.path().to_path_buf());
+        assert!(allowed.update.configured);
+        assert!(allowed.update.allow_insecure_http);
+        assert_eq!(
+            allowed.update.base_url.as_deref(),
+            Some("http://192.0.2.10:8787")
+        );
     }
 
     #[test]

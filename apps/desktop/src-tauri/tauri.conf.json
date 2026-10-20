@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OrderHub Desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.orderhub.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev:web",
@@ -55,6 +55,7 @@
   "plugins": {
     "updater": {
       "endpoints": [],
+      "dangerousInsecureTransportProtocol": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2QUJGNTQwQ0MwQTAyNkQKUldSdEFnck1RUFdyRnRiQm9LUDdjeUZIV0ZHYmNXYmx3OVhJNmdzYlJEWjVXMzd3cXUvQ2VRdzYK",
       "windows": {
         "installMode": "passive"

@@ -67,6 +67,7 @@ export interface UpdateConfigSummary {
   autoDownload: boolean;
   enforceMinVersion: boolean;
   allowInsecureLoopback: boolean;
+  allowInsecureHttp: boolean;
   checkIntervalSecs: number;
 }
 

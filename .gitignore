@@ -43,3 +43,4 @@ screenshots/
 Thumbs.db
 .DS_Store
 test-artifacts/verify-release/
+test-artifacts/http-config/

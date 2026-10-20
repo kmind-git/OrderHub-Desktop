@@ -139,6 +139,7 @@ pub struct UpdateConfigSummary {
     pub auto_download: bool,
     pub enforce_min_version: bool,
     pub allow_insecure_loopback: bool,
+    pub allow_insecure_http: bool,
     pub check_interval_secs: u64,
 }
 

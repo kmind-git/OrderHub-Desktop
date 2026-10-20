@@ -63,6 +63,20 @@ node app/dist/server.js
 - `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1`，发布前 HEAD/GET 验证包可达；
 - 数据目录与安装包目录使用磁盘加密和 ACL，进程以低权限账号运行。
 
+受信内网没有 HTTPS 域名时，可以显式使用 IP + HTTP：
+
+```powershell
+$env:ORDERHUB_UPDATER_HOST = '0.0.0.0'
+$env:ORDERHUB_UPDATER_PORT = '8787'
+$env:ORDERHUB_UPDATER_PUBLIC_BASE_URL = 'http://8.159.158.144:8787/artifacts'
+$env:ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL = '1'
+node app/dist/server.js
+```
+
+客户端同时设置 `[update].allow_insecure_http = true`，且只允许受控网段访问 8787。
+这是明文传输，不能用于公网。服务端 `ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL`
+必须显式设置，否则 `PUBLIC_BASE_URL` 仍会被拒绝。
+
 ### 2.2 反向代理
 
 - 客户端接口与 `/artifacts/*`：HTTPS；

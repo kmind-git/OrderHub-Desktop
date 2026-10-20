@@ -33,6 +33,9 @@ auto_download = false
 enforce_min_version = true
 # Only for a loopback development service; never for production.
 allow_insecure_loopback = false
+# Explicitly allow a plain-HTTP update service on a trusted LAN/IP.
+# Release builds also require the updater insecure-transport opt-in.
+allow_insecure_http = false
 check_interval_secs = 3600
 
 [logging]

@@ -14,7 +14,7 @@
 | --- | --- | --- | --- |
 | A：连接与只读 | Tauri 壳、配置、凭证保护、Snapshot + Watch、工作台 | **部分** | Rust 只读 Live Snapshot + WatchEvents 已通过（见 §3）；Tauri 窗口在真实配置下启动并显示 READY/WRITABLE 与 1 条活动订单，无写入；v0.1.1 修复启动控制台闪窗/ACL 扫描，安装版 warm start 约 0.3 s；分页/断线/epoch 逻辑有单元覆盖，事件级故障演练待联调 |
 | B：业务闭环 | 报单、撤单、请求记录、未知结果查询 | **待联调** | 实现与校验/记录测试完成；未向授权环境发送任何报单或撤单 |
-| C：更新闭环 | Hono + SQLite、发布 CLI、签名包、更新页、安装保护 | **部分** | 服务 + CLI + staging/publish/policy/eligibility 端到端测试通过；NSIS 安装包与 updater `.sig` 已构建并发布到 [GitHub 预发布 v0.1.1](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.1)；0.1.0→0.2.0 实际更新重启待干净 Windows 环境 |
+| C：更新闭环 | Hono + SQLite、发布 CLI、签名包、更新页、安装保护 | **部分** | 服务 + CLI + staging/publish/policy/eligibility 端到端测试通过；v0.1.2 支持受信内网 HTTP，HTTP policy/事件上报已实测；NSIS 安装包与 updater `.sig` 已发布到 [GitHub 预发布 v0.1.2](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.2)；实际 HTTP 安装包下载与升级重启待服务部署/干净环境 |
 | D：策略与故障 | beta/stable、灰度、暂停、最低版本、修复版本、审计 | **部分** | 策略/灰度/暂停/撤回/最低版本自动化通过；两台客户端分桶与真实发布审计待联调 |
 
 ## 2. 方案第 10 节验证场景

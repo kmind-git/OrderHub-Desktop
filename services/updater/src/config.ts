@@ -44,8 +44,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): UpdaterConfig 
   const base = new URL(publicBaseUrl);
   const isLoopback = ["127.0.0.1", "::1", "localhost"].includes(base.hostname);
   const allowInsecure = bool(env.ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL, isLoopback);
-  if (base.protocol !== "https:" && !(allowInsecure && isLoopback)) {
-    throw new Error("ORDERHUB_UPDATER_PUBLIC_BASE_URL must use HTTPS (HTTP is only allowed for loopback development)");
+  if (base.protocol !== "https:" && !allowInsecure) {
+    throw new Error(
+      "ORDERHUB_UPDATER_PUBLIC_BASE_URL must use HTTPS unless ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL is explicitly enabled",
+    );
   }
   const serveArtifacts = bool(env.ORDERHUB_UPDATER_SERVE_ARTIFACTS, env.NODE_ENV !== "production");
 

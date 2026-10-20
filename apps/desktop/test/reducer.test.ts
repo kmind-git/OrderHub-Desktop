@@ -114,6 +114,7 @@ function bootstrapped() {
           autoDownload: false,
           enforceMinVersion: true,
           allowInsecureLoopback: false,
+          allowInsecureHttp: false,
           checkIntervalSecs: 3600,
         },
         issues: [],

@@ -170,7 +170,8 @@ export function ConnectPage() {
                   </div>
                   <div className="small muted">
                     自动检查 {config.update.autoCheck ? "开启" : "关闭"} · 自动下载{" "}
-                    {config.update.autoDownload ? "开启" : "关闭"} · 间隔{" "}
+                    {config.update.autoDownload ? "开启" : "关闭"} · HTTP{" "}
+                    {config.update.allowInsecureHttp ? "允许" : "禁止"} · 间隔{" "}
                     {Math.round(config.update.checkIntervalSecs / 60)} 分钟
                   </div>
                 </div>
@@ -362,7 +363,7 @@ export function ConnectPage() {
               </li>
               <li>
                 <Icon name="info" size={15} />
-                更新服务 Token 与业务 Token 分离；MVP config 暂未配置更新服务地址。
+                更新服务与业务服务独立；生产建议 HTTPS，HTTP 仅在受信内网显式开启。
               </li>
             </ul>
           </Panel>

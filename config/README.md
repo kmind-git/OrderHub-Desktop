@@ -20,13 +20,17 @@
 3. 当前工作目录及其上两级/三级的 `config/`（便于 `pnpm dev:tauri`）。
 4. 编译期源码树中的 `config/`。
 
-正式安装时由启动入口显式设置 `ORDERHUB_CONFIG_DIR`，不要把真实配置放入安装目录或源码仓库。
+安装版优先读取 exe 同级的 `config/`；生产环境更推荐由启动入口设置
+`ORDERHUB_CONFIG_DIR` 指向受保护目录。真实配置和 Token 不得提交到源码仓库。
 
 ## 更新服务
 
-当前 MVP 的 `client.toml` 没有 `[update].base_url`。补齐更新服务地址后，更新检查、
-最低版本策略与安装前资格复核才会启用。更新服务访问凭证与业务 Bearer Token 分离；
-不要在 `[update]` 中复用业务 Token。
+补齐 `[update].base_url` 后，更新检查、最低版本策略与安装前资格复核才会启用。
+更新服务访问凭证与业务 Bearer Token 分离；不要在 `[update]` 中复用业务 Token。
+
+默认只允许 HTTPS。受信内网使用纯 HTTP 时必须显式设置
+`allow_insecure_http = true`，并且 release 构建已开启 updater 的
+`dangerousInsecureTransportProtocol`。这会让安装包和安装请求以明文传输，仅用于受控内网。
 
 ## 安全边界
 

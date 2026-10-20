@@ -39,7 +39,7 @@ pnpm --filter @orderhub/updater test
 
 ```text
 Test Files  2 passed (2)
-     Tests  12 passed (12)
+     Tests  13 passed (13)
 ```
 
 覆盖：health/ready、admin 认证、发布/暂停/撤回、revision 冲突、stable/beta、灰度 0/100、
@@ -94,7 +94,7 @@ cargo test
 cargo check --all-targets: Finished (exit 0)
 cargo test --lib:
   running 14 tests
-  test result: ok. 13 passed; 0 failed; 1 ignored
+  test result: ok. 14 passed; 0 failed; 1 ignored
 ```
 
 通过：精确十进制、配置解析（路径逃逸/空 Token）、DPAPI 往返与篡改检测、原子写入、安装 ID、
@@ -190,15 +190,15 @@ pnpm --filter @orderhub/desktop tauri build --no-bundle
 带 `--config src-tauri/tauri.update.conf.json` 生成 NSIS + updater artifacts 成功：
 
 ```text
-OrderHub Desktop_0.1.1_x64-setup.exe       8.31 MiB
-OrderHub Desktop_0.1.1_x64-setup.exe.sig   448 bytes
-sha256 cc000e38ef8d73262d8d02c93ac136253ed1a5c2bae50ee77b01a6fb6bbf38b6
+OrderHub Desktop_0.1.2_x64-setup.exe       8.29 MiB
+OrderHub Desktop_0.1.2_x64-setup.exe.sig   448 bytes
+sha256 be7b343a64ce1ad15f792e21df63ced5fe0969a76c68d01c11c7d64e3412c204
 ```
 
 安装包以无空格文件名上传到 GitHub 预发布：
-[v0.1.1](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.1)。
-v0.1.0 的安装包（SHA-256 `455ac77e...`）仍保留在旧 release。重新下载发布资产校验
-SHA-256 与本地一致。首次尝试时 NSIS 下载曾超时，重试后成功；网络受限环境的处理见
+[v0.1.2](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.2)。
+v0.1.0/v0.1.1 的安装包仍保留在旧 release。重新下载发布资产校验 SHA-256 与本地一致。
+首次尝试时 NSIS 下载曾超时，重试后成功；网络受限环境的处理见
 [runbook](runbook.md#3-发布一个新版本)。
 
 ## 9.2 真实 GitHub 发布物 → 更新服务
@@ -213,6 +213,33 @@ SHA-256 与本地一致。首次尝试时 NSIS 下载曾超时，重试后成功
 - 该环境 Node fetch 对 GitHub 资产 URL 的发布前 HEAD 检查失败，publish 测试使用
   `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=0`；PowerShell/Curl `HEAD` 同一 URL 返回 200。
   生产构建机应保持校验开启并验证出站访问。
+
+## 9.3 内网 HTTP 更新服务
+
+更新服务绑定 `0.0.0.0:18787`，artifact 根地址为
+`http://192.168.1.5:18787/artifacts`，并设置
+`ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL=1`。客户端使用独立配置：
+
+```toml
+[update]
+base_url = "http://192.168.1.5:18787"
+allow_insecure_http = true
+channel = "beta"
+```
+
+启动客户端后，服务端记录到：
+
+```text
+GET /v1/update-policy/beta/windows/x86_64/0.1.2 200
+POST /v1/update-events 202
+```
+
+说明非回环 IP 的 HTTP 策略请求和事件上报已打通。由于测试时没有更新的
+0.1.3 签名包，未执行 HTTP 安装包下载/验签；Tauri updater 的
+`dangerousInsecureTransportProtocol` 已在构建配置中开启。
+
+注意：`8.159.158.144:8787` 当前未监听。客户端配置已指向该地址，但需要先在
+业务服务器上启动更新服务，否则“检查更新”会显示连接失败。
 
 ## 10. 未执行
 

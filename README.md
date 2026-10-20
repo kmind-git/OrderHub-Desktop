@@ -1,7 +1,7 @@
 # OrderHub Desktop MVP
 
 [GitHub 仓库](https://github.com/kmind-git/OrderHub-Desktop) ·
-[预发布 v0.1.1](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.1)
+[预发布 v0.1.2](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.2)
 
 OrderHub Desktop 是面向 Windows x64 的桌面客户端 MVP：React + TypeScript + Vite 界面，
 Tauri 2 / Rust 原生层连接现有 `orderhub.v1` gRPC 服务，独立 Hono + SQLite 更新服务负责
@@ -41,16 +41,16 @@ docs/                    MVP 方案、实现、安全、部署与验收记录
 
 ## 下载测试安装包
 
-从 [GitHub Release v0.1.1](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.1)
+从 [GitHub Release v0.1.2](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.2)
 下载 Windows x64 NSIS 安装包、`.sig`、`SHA256SUMS.txt` 和
-[release-manifest.json](https://github.com/kmind-git/OrderHub-Desktop/releases/download/v0.1.1/release-manifest.json)。
+[release-manifest.json](https://github.com/kmind-git/OrderHub-Desktop/releases/download/v0.1.2/release-manifest.json)。
 
-v0.1.1 修复了启动时的控制台闪窗和启动 ACL 全目录扫描，并加入深色启动占位页；
-仍使用测试 updater 密钥，未做 Authenticode 签名。
+v0.1.2 支持受信内网 HTTP 更新服务；仍使用测试 updater 密钥，未做 Authenticode 签名。
+HTTP 是明文传输，只应在受控内网显式开启。
 
 > 这是内部试装预发布版本，使用测试 updater 签名密钥，未做 Authenticode 签名；安装包不包含
 > 业务配置或凭证。运行前必须提供 `config/` 或设置 `ORDERHUB_CONFIG_DIR`。详见
-> [发布说明](docs/release-notes-v0.1.1.md)。
+> [发布说明](docs/release-notes-v0.1.2.md)。
 
 ## 快速开始
 
