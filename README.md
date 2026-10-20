@@ -52,22 +52,23 @@ HTTP 是明文传输，只应在受控内网显式开启。
 > 业务配置或凭证。运行前必须提供 `config/` 或设置 `ORDERHUB_CONFIG_DIR`。详见
 > [发布说明](docs/release-notes-v0.1.2.md)。
 
-## 更新服务部署包
+## 更新服务部署包（CentOS Stream）
 
 更新服务是独立的 Node 进程，不包含在桌面安装包里。从
-[Updater v0.1.2 Release](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/updater-v0.1.2)
-下载 `OrderHub-Updater-0.1.2.zip`，解压后按包内 `README.md`/`start.ps1` 启动：
+[Updater v0.1.3 Release](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/updater-v0.1.3)
+下载 `OrderHub-Updater-0.1.3-centos-stream.tar.gz`：
 
-```powershell
-Expand-Archive OrderHub-Updater-0.1.2.zip -DestinationPath D:\OrderHub\updater
-cd D:\OrderHub\updater
-Copy-Item .env.example .env
-notepad .env
-.\start.ps1
+```bash
+tar -xzf OrderHub-Updater-0.1.3-centos-stream.tar.gz -C /opt/orderhub-updater
+cd /opt/orderhub-updater
+cp .env.example .env
+vi .env
+./start.sh
 ```
 
-部署包包含自包含的 `dist/server.js`、`migrations/`、`.env.example` 和启动脚本，不需要
-`node_modules`。默认监听 `0.0.0.0:8787`，健康检查 `/healthz`、`/readyz`。
+部署包包含自包含的 `dist/server.js`、`migrations/`、`.env.example`、`start.sh` 和
+`orderhub-updater.service`，不需要 `node_modules`。需要 Node.js 22.13+，默认监听
+`0.0.0.0:8787`，健康检查 `/healthz`、`/readyz`。详细步骤见包内 `README.md`。
 
 ## 快速开始
 

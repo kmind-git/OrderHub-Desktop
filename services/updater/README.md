@@ -19,8 +19,8 @@ node dist/server.js
 `/artifacts/*` 提供测试包；生产建议关闭并由反向代理/文件服务承担下载。
 
 `pnpm --filter @orderhub/updater build` 现在输出自包含的 `dist/server.js`（除 Node 内置
-模块外无运行时依赖）。GitHub Release `updater-v0.1.2` 提供包含 `dist/`、`migrations/`、
-`.env.example` 和 `start.ps1` 的部署包。
+模块外无运行时依赖）。GitHub Release `updater-v0.1.3` 提供 CentOS Stream 部署包，包含
+`dist/`、`migrations/`、`.env.example`、`start.sh` 和 systemd unit。
 
 ## 环境变量
 
