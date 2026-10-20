@@ -145,6 +145,24 @@ node services/updater/dist/server.js
 - 事件流建立，未提交或撤销任何订单；
 - 关闭应用后不再保留业务 Watch 流。
 
+## 8.1 v0.1.1 启动修复
+
+安装版启动慢并短暂出现控制台窗口的根因：
+
+- 启动时对数据根目录执行 `icacls /T`，递归扫描了约 73.5 MB 的 WebView2 缓存；
+- GUI 子进程没有 `CREATE_NO_WINDOW`，Windows 为 `icacls.exe` 创建了短暂控制台。
+
+修复：
+
+- 不再扫描数据根目录，只对 `requests` 目录做一次 ACL 加固；
+- 加固成功写 `.acl-hardened`，后续启动跳过；
+- `icacls` 使用 `CREATE_NO_WINDOW`，不创建控制台；
+- `index.html` 增加深色启动占位页。
+
+在安装版 v0.1.1 上实测：已有 WebView2 缓存时窗口创建约 284 ms，首次启动约 1 s；
+清空 WebView2 缓存后的首次初始化约 3 s（WebView2 正常行为）。进程树中仅剩
+`msedgewebview2.exe`，没有 `conhost.exe`/`cmd.exe` 子进程。
+
 ## 9. 前端生产构建
 
 ```powershell
@@ -154,9 +172,9 @@ pnpm --filter @orderhub/desktop build:web
 结果：
 
 ```text
-dist/index.html                   0.50 kB
+dist/index.html                   2.76 kB │ gzip: 1.15 kB
 dist/assets/index-*.css          40.46 kB │ gzip: 8.82 kB
-dist/assets/index-*.js          347.23 kB │ gzip: 103.99 kB
+dist/assets/index-*.js          347.54 kB │ gzip: 104.13 kB
 ✓ built
 ```
 
@@ -172,15 +190,16 @@ pnpm --filter @orderhub/desktop tauri build --no-bundle
 带 `--config src-tauri/tauri.update.conf.json` 生成 NSIS + updater artifacts 成功：
 
 ```text
-OrderHub Desktop_0.1.0_x64-setup.exe       8.30 MiB
-OrderHub Desktop_0.1.0_x64-setup.exe.sig   448 bytes
-sha256 455ac77e910ec54b6750bf435eb9062b5c088fe4c397d8085f8bcc95fc7b8720
+OrderHub Desktop_0.1.1_x64-setup.exe       8.31 MiB
+OrderHub Desktop_0.1.1_x64-setup.exe.sig   448 bytes
+sha256 cc000e38ef8d73262d8d02c93ac136253ed1a5c2bae50ee77b01a6fb6bbf38b6
 ```
 
 安装包以无空格文件名上传到 GitHub 预发布：
-[v0.1.0](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.0)。
-重新下载发布资产校验 SHA-256 与本地一致。首次尝试时 NSIS 下载曾超时，重试后成功；
-网络受限环境的处理见 [runbook](runbook.md#3-发布一个新版本)。
+[v0.1.1](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.1)。
+v0.1.0 的安装包（SHA-256 `455ac77e...`）仍保留在旧 release。重新下载发布资产校验
+SHA-256 与本地一致。首次尝试时 NSIS 下载曾超时，重试后成功；网络受限环境的处理见
+[runbook](runbook.md#3-发布一个新版本)。
 
 ## 9.2 真实 GitHub 发布物 → 更新服务
 

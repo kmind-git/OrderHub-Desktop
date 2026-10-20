@@ -97,11 +97,9 @@ pub fn run() {
                     data_dir.display()
                 ))
             })?;
-            if std::env::var("ORDERHUB_SKIP_ACL").is_err() {
-                if let Err(error) = storage::harden_directory_acl(&data_dir) {
-                    eprintln!("orderhub: data directory ACL hardening skipped: {error}");
-                }
-            }
+            // Do not walk the whole data directory with icacls: it contains the
+            // WebView2 cache and can take seconds on every launch. The request
+            // store hardens its own small directory when it is opened.
             let installation_id =
                 storage::load_or_create_installation_id(&data_dir).map_err(|error| {
                     std::io::Error::other(format!("installation id failed: {error}"))

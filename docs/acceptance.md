@@ -12,9 +12,9 @@
 
 | 阶段 | 交付 | 状态 | 证据/剩余 |
 | --- | --- | --- | --- |
-| A：连接与只读 | Tauri 壳、配置、凭证保护、Snapshot + Watch、工作台 | **部分** | Rust 只读 Live Snapshot + WatchEvents 已通过（见 §3）；Tauri 窗口在真实配置下启动并显示 READY/WRITABLE 与 1 条活动订单，无写入；分页/断线/epoch 逻辑有单元覆盖，事件级故障演练待联调 |
+| A：连接与只读 | Tauri 壳、配置、凭证保护、Snapshot + Watch、工作台 | **部分** | Rust 只读 Live Snapshot + WatchEvents 已通过（见 §3）；Tauri 窗口在真实配置下启动并显示 READY/WRITABLE 与 1 条活动订单，无写入；v0.1.1 修复启动控制台闪窗/ACL 扫描，安装版 warm start 约 0.3 s；分页/断线/epoch 逻辑有单元覆盖，事件级故障演练待联调 |
 | B：业务闭环 | 报单、撤单、请求记录、未知结果查询 | **待联调** | 实现与校验/记录测试完成；未向授权环境发送任何报单或撤单 |
-| C：更新闭环 | Hono + SQLite、发布 CLI、签名包、更新页、安装保护 | **部分** | 服务 + CLI + staging/publish/policy/eligibility 端到端测试通过；NSIS 安装包与 updater `.sig` 已构建并发布到 [GitHub 预发布 v0.1.0](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.0)；0.1.0→0.2.0 实际安装重启待干净 Windows 环境 |
+| C：更新闭环 | Hono + SQLite、发布 CLI、签名包、更新页、安装保护 | **部分** | 服务 + CLI + staging/publish/policy/eligibility 端到端测试通过；NSIS 安装包与 updater `.sig` 已构建并发布到 [GitHub 预发布 v0.1.1](https://github.com/kmind-git/OrderHub-Desktop/releases/tag/v0.1.1)；0.1.0→0.2.0 实际更新重启待干净 Windows 环境 |
 | D：策略与故障 | beta/stable、灰度、暂停、最低版本、修复版本、审计 | **部分** | 策略/灰度/暂停/撤回/最低版本自动化通过；两台客户端分桶与真实发布审计待联调 |
 
 ## 2. 方案第 10 节验证场景
@@ -29,7 +29,7 @@
 | 撤单竞争 | **待联调** | 撤单独立 request_id、受理不等于撤成、终态来自服务端；需授权环境观察受理期间成交 |
 | 更新协议 | **通过** | updater 测试：无更新 204、有更新 200、平台/通道/灰度隔离、409 revision、410 暂停/撤回、503 无强制候选、Tauri 响应字段；release E2E |
 | 包安全 | **部分** | 发布要求完整签名文本、包 URL 可读、不可变 staging、SHA-256/大小；Tauri `download/verify/install`；未用篡改包/错签名包实际触发 Tauri 安装器 |
-| 安装与恢复 | **待联调** | 维护门禁、写锁、未知请求确认、restart marker、启动确认、人工修复说明；需实际构建签名 NSIS 并安装验证 |
+| 安装与恢复 | **部分** | v0.1.1 NSIS 已构建并覆盖安装到测试机，启动无控制台窗口；维护门禁、写锁、未知请求确认、restart marker、启动确认、卸载/更新重启仍需完整联调 |
 | 发布一致性 | **部分** | 缺包不能发布、revision 冲突、暂停/撤回、审计；SQLite+安装包备份恢复演练未执行 |
 
 ## 3. 只读 Live Snapshot 证据

@@ -6,9 +6,88 @@
     <meta name="theme-color" content="#0b1013" />
     <meta name="color-scheme" content="dark" />
     <title>OrderHub Desktop</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #0a0f12;
+      }
+      .boot-splash {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        color: #e8f0f0;
+        font-family:
+          "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
+          "PingFang SC", sans-serif;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(98, 216, 209, 0.08), transparent 34%),
+          #0a0f12;
+      }
+      .boot-mark {
+        width: 58px;
+        height: 58px;
+        border-radius: 18px;
+        border: 1px solid rgba(98, 216, 209, 0.48);
+        background: linear-gradient(145deg, #173137, #0f1c20);
+        color: #62d8d1;
+        display: grid;
+        place-items: center;
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 27px;
+        font-weight: 700;
+        box-shadow: 0 0 42px rgba(98, 216, 209, 0.14);
+      }
+      .boot-title {
+        font-size: 18px;
+        font-weight: 650;
+        letter-spacing: 0.01em;
+      }
+      .boot-sub {
+        color: #829699;
+        font-size: 12.5px;
+        letter-spacing: 0.02em;
+      }
+      .boot-line {
+        width: 128px;
+        height: 2px;
+        margin-top: 4px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(98, 216, 209, 0.12);
+      }
+      .boot-line::after {
+        content: "";
+        display: block;
+        width: 42%;
+        height: 100%;
+        border-radius: inherit;
+        background: #62d8d1;
+        animation: boot-slide 1.1s ease-in-out infinite alternate;
+      }
+      @keyframes boot-slide {
+        from {
+          transform: translateX(-20%);
+        }
+        to {
+          transform: translateX(160%);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-splash" role="status" aria-label="OrderHub Desktop 正在启动">
+        <div class="boot-mark" aria-hidden="true">E</div>
+        <div class="boot-title">OrderHub Desktop</div>
+        <div class="boot-sub">正在初始化本地安全存储与业务连接…</div>
+        <div class="boot-line" aria-hidden="true"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

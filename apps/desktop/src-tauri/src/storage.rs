@@ -104,30 +104,42 @@ pub fn load_or_create_installation_id(data_dir: &Path) -> Result<String, String>
     Ok(record.installation_id)
 }
 
-/// Best-effort ACL hardening for the local data directory.
+/// Best-effort ACL hardening for a sensitive local data directory.
 ///
-/// `%LOCALAPPDATA%` is already user-scoped by default. This removes inherited
-/// ACEs and grants the current user full control recursively. Failure is
-/// reported to the caller but never prevents the app from starting, because a
-/// missing `icacls` or a locked-down enterprise profile would otherwise brick
-/// the client. DPAPI still binds request records to the current Windows user.
+/// `%LOCALAPPDATA%` is already user-scoped by default. This keeps inherited
+/// SYSTEM/Administrators access and explicitly grants the current user full
+/// control recursively. Failure is reported to the caller but never prevents
+/// the app from starting, because a missing `icacls` or a locked-down
+/// enterprise profile would otherwise brick the client. DPAPI still binds
+/// request records to the current Windows user.
 #[cfg(windows)]
 pub fn harden_directory_acl(path: &Path) -> Result<(), String> {
     let username = std::env::var("USERNAME").map_err(|_| "USERNAME 不可用".to_string())?;
     if username.trim().is_empty() {
         return Err("USERNAME 为空".into());
     }
+    // The ACL only needs to be repaired once. Avoid spawning icacls on every
+    // launch (and avoid a visible console flash on GUI-only builds).
+    let marker = path.join(".acl-hardened");
+    if marker.is_file() {
+        return Ok(());
+    }
     // Keep inherited SYSTEM/Administrators access (required for Windows
     // maintenance) but explicitly grant the current user full control. We do
     // not strip inheritance: on some profiles the grant is not applied to
     // existing files reliably, which made encrypted request records
     // unreadable after the next startup. %LOCALAPPDATA% is already user-scoped.
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let output = std::process::Command::new("icacls")
         .arg(path)
         .arg("/grant:r")
         .arg(format!("{username}:(OI)(CI)F"))
         .arg("/T")
         .arg("/Q")
+        // The GUI process has no console. Without this flag Windows creates a
+        // short-lived console window for the child process on every launch.
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|error| format!("icacls 无法运行：{error}"))?;
     if !output.status.success() {
@@ -137,6 +149,7 @@ pub fn harden_directory_acl(path: &Path) -> Result<(), String> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+    let _ = std::fs::write(&marker, b"1");
     Ok(())
 }
 

@@ -24,9 +24,10 @@
   - 内容 JSON 先经 Windows DPAPI（`CryptProtectData` + 固定 entropy）加密；
   - 外层信封只含 schemaVersion、requestId、protection、payload；
   - 通过临时文件 + `MoveFileExW(MOVEFILE_REPLACE_EXISTING | WRITE_THROUGH)` 原子替换；
-  - 数据目录启动时用 `icacls` 做 best-effort ACL 加固：在继承 ACL 基础上显式授予当前用户
-    完全控制，保留 SYSTEM/Administrators 必要维护访问；不破坏继承，避免已有加密文件在下次
-    启动时不可读。
+  - 首次打开 `requests` 目录时用 `icacls` 做 best-effort ACL 加固：在继承 ACL 基础上显式
+    授予当前用户完全控制，保留 SYSTEM/Administrators 必要维护访问；不破坏继承，避免已有
+    加密文件在下次启动时不可读。加固成功后写入 `.acl-hardened` 标记，后续启动不再扫描；
+    子进程使用 `CREATE_NO_WINDOW`，避免 GUI 进程闪出控制台窗口，也不扫描 WebView2 缓存。
 - DPAPI 绑定当前 Windows 用户；同一用户会话被完全控制时无法防止恶意程序读取。MVP 不把
   DPAPI 当服务端秘密或跨用户保护。
 - 请求记录 schema_version 为 1；升级备份并兼容旧字段，禁止用清空记录解决迁移问题。
