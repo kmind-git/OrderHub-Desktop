@@ -410,14 +410,307 @@ cp -a "$BACKUP/orderhub-updater.env" "$CONFIG"
 
 再按第 7 节原方式启动，重复第 8 节健康检查。
 
-## 10. 升级完成后的边界
+## 10. 发布桌面 0.1.3（升级服务不会自动完成）
 
-这次只升级更新服务程序，不会自动发布桌面 0.1.3。要让 v0.1.2 客户端自动升级，还需要：
+升级服务程序后，数据库里的 release 和 beta 策略不会自动变化。要完成“v0.1.2 客户端自动
+发现 0.1.3”，还要做三件事：
 
-1. 用发布 CLI 登记 `release-assets/v0.1.3/release-manifest.json`；
+1. 登记桌面 0.1.3 的 release；
 2. 发布该 release；
-3. 将 beta 策略指向该 release；
-4. 客户端执行“检查更新”。
+3. 把 beta 策略指向它。
 
-发布步骤见 [`upgrade-v0.1.2-to-v0.1.3.md`](upgrade-v0.1.2-to-v0.1.3.md)。发布时需要
-`ORDERHUB_UPDATER_ADMIN_TOKEN`，该值在 `$CONFIG` 中；不要把它打印到日志或聊天记录。
+下面所有命令都在服务器上以 `orderhub-updater` 用户执行，只需要 `curl` 和 `node`，不要求
+仓库、pnpm 或 root。`$BASE`、`$APP`、`$CONFIG`、`$DATA` 沿用前面的定义。
+
+### 10.1 读取 admin token
+
+```bash
+CONFIG=/home/orderhub-updater/config/orderhub-updater.env
+BASE=/home/orderhub-updater
+DATA=/home/orderhub-updater/data
+API=http://127.0.0.1:8787
+
+TOKEN=$(sed -n 's/^ORDERHUB_UPDATER_ADMIN_TOKEN=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
+test -n "$TOKEN" || { echo "admin token missing; stop and report"; exit 1; }
+echo "admin token loaded (not printed)"
+```
+
+不要把 `$TOKEN` 写进日志、命令历史或聊天记录。
+
+### 10.2 上传安装包和 manifest
+
+本部署推荐把安装包放到服务自己的 `/artifacts` 下，不让更新服务依赖 GitHub 出网。
+
+在本地仓库目录执行（PowerShell）：
+
+```powershell
+scp release-assets/v0.1.3/OrderHub-Desktop_0.1.3_x64-setup.exe `
+  release-assets/v0.1.3/release-manifest.json `
+  orderhub-updater@8.159.158.144:/home/orderhub-updater/
+```
+
+如果服务器能直接访问 GitHub，也可以只上传 manifest；但当前测试环境的 Node fetch 对 GitHub
+资产曾出现不可达，本地 artifact 更稳定。
+
+在服务器上确认文件：
+
+```bash
+cd "$BASE"
+ls -lh OrderHub-Desktop_0.1.3_x64-setup.exe release-manifest.json
+```
+
+校验安装包：
+
+```bash
+ACTUAL=$(sha256sum OrderHub-Desktop_0.1.3_x64-setup.exe | cut -d' ' -f1)
+EXPECTED=3a05fe398a6b0c23242dfe7e8e93b90659582b19b284b7dcd2a3552d145b6f23
+[ "$ACTUAL" = "$EXPECTED" ] || { echo "installer sha256 mismatch; stop"; exit 1; }
+echo "installer sha256 ok"
+```
+
+### 10.3 生成本地 artifact manifest
+
+从现有配置读取 artifact 根目录和公共 URL，不要猜：
+
+```bash
+ARTIFACT_DIR=$(sed -n 's/^ORDERHUB_UPDATER_ARTIFACT_DIR=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
+PUBLIC_BASE=$(sed -n 's/^ORDERHUB_UPDATER_PUBLIC_BASE_URL=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
+PUBLIC_BASE=${PUBLIC_BASE%/}
+echo "ARTIFACT_DIR=$ARTIFACT_DIR"
+echo "PUBLIC_BASE=$PUBLIC_BASE"
+```
+
+确认 `ARTIFACT_DIR` 是绝对路径且可写：
+
+```bash
+case "$ARTIFACT_DIR" in
+  /*) ;;
+  *) echo "ARTIFACT_DIR is not absolute; stop"; exit 1 ;;
+esac
+test -w "$ARTIFACT_DIR" || { echo "ARTIFACT_DIR not writable; stop"; exit 1; }
+```
+
+复制安装包到静态目录：
+
+```bash
+install -d "$ARTIFACT_DIR/0.1.3/windows-x86_64"
+cp "$BASE/OrderHub-Desktop_0.1.3_x64-setup.exe" \
+  "$ARTIFACT_DIR/0.1.3/windows-x86_64/OrderHub-Desktop_0.1.3_x64-setup.exe"
+sha256sum "$ARTIFACT_DIR/0.1.3/windows-x86_64/OrderHub-Desktop_0.1.3_x64-setup.exe"
+```
+
+生成 manifest 副本，只改 URL，不改 size/SHA-256/signature：
+
+```bash
+MANIFEST="$BASE/release-manifest-0.1.3.local.json"
+ARTIFACT_URL="$PUBLIC_BASE/0.1.3/windows-x86_64/OrderHub-Desktop_0.1.3_x64-setup.exe"
+
+node -e '
+const fs = require("fs");
+const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (m.version !== "0.1.3") throw new Error("unexpected version " + m.version);
+if (m.artifacts.length !== 1) throw new Error("expected one artifact");
+m.artifacts[0].url = process.argv[3];
+fs.writeFileSync(process.argv[2], JSON.stringify(m, null, 2));
+' "$BASE/release-manifest.json" "$MANIFEST" "$ARTIFACT_URL"
+
+cat "$MANIFEST"
+```
+
+核对 manifest：
+
+```bash
+node -e '
+const fs = require("fs");
+const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const a = m.artifacts[0];
+console.log(JSON.stringify({version: m.version, channel: m.channel, size: a.size, sha256: a.sha256, url: a.url}, null, 2));
+if (m.version !== "0.1.3" || a.size !== 8737252 || a.sha256 !== "3a05fe398a6b0c23242dfe7e8e93b90659582b19b284b7dcd2a3552d145b6f23") {
+  process.exit(2);
+}
+' "$MANIFEST"
+```
+
+服务端发布时会通过 `ARTIFACT_URL` 下载并校验这个安装包。确认该 URL 能从服务器访问：
+
+```bash
+curl -fsSI "$ARTIFACT_URL" | head
+```
+
+如果这里 404/403，先修复静态路径或 `PUBLIC_BASE_URL`，不要继续发布。
+
+### 10.4 登记 release
+
+```bash
+RESP="$BASE/release-register-0.1.3.json"
+
+curl -fsS -o "$RESP" -X POST "$API/v1/admin/releases" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary "@$MANIFEST"
+
+cat "$RESP"
+```
+
+成功返回 HTTP 201，响应中包含 `release_id` 和 `revision`。解析：
+
+```bash
+RELEASE_ID=$(node -e '
+const fs = require("fs");
+const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (!r.release_id) throw new Error("release_id missing");
+process.stdout.write(r.release_id);
+' "$RESP")
+
+RELEASE_REV=$(node -e '
+const fs = require("fs");
+const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+process.stdout.write(String(r.revision));
+' "$RESP")
+
+echo "RELEASE_ID=$RELEASE_ID RELEASE_REV=$RELEASE_REV"
+```
+
+如果返回 409 `RELEASE_VERSION_EXISTS`，说明该版本已登记过，不要重复创建；停止并报告现有
+`release_id`，或让有权限的人从数据库/管理端确认后再发布。
+
+如果返回 `ARTIFACT_UNREACHABLE`，按 10.3 做本地 artifact 回退后重试；不要改成
+`VERIFY_ARTIFACT_URL=0`。
+
+如果返回 `SIGNING_KEY_NOT_CONFIGURED`，说明第 6 节配置没有生效，先修复配置并重启服务。
+
+### 10.5 发布 release
+
+```bash
+PUBLISH="$BASE/release-publish-0.1.3.json"
+
+curl -fsS -o "$PUBLISH" -X POST "$API/v1/admin/releases/$RELEASE_ID/publish" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data "{\"expected_revision\":$RELEASE_REV}"
+
+cat "$PUBLISH"
+```
+
+成功返回 HTTP 200，`status` 为 `published`，`revision` 会加 1。
+
+若返回 409 `RELEASE_REVISION_CONFLICT`，重新读取该 release 的 revision 后再决定；不要在
+revision 不明时重复发布。
+
+### 10.6 将 beta 策略指向 0.1.3
+
+先读取当前策略（公开接口）：
+
+```bash
+INSTALLATION_ID=6f0c0a7e-3a8f-4f4d-9e8e-4c0f6f2a1b2c
+POLICY_BEFORE="$BASE/policy-before-0.1.3.json"
+
+curl -fsS -H "X-Installation-ID: $INSTALLATION_ID" \
+  -o "$POLICY_BEFORE" \
+  "$API/v1/update-policy/beta/windows/x86_64/0.1.2?installer=nsis"
+
+cat "$POLICY_BEFORE"
+```
+
+生成 policy 更新请求，保留现有的最低版本设置（当前应为 `null`，不要在这一步提高最低版本）：
+
+```bash
+POLICY_BODY="$BASE/policy-body-0.1.3.json"
+
+node -e '
+const fs = require("fs");
+const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const body = {
+  expected_revision: p.policy_revision,
+  rollout_release_id: process.argv[2],
+  min_supported_version: p.min_supported_version,
+  min_supported_effective_at: p.min_supported_effective_at,
+  rollout_percent: 100,
+  valid_for_seconds: 86400
+};
+fs.writeFileSync(process.argv[3], JSON.stringify(body));
+' "$POLICY_BEFORE" "$RELEASE_ID" "$POLICY_BODY"
+
+cat "$POLICY_BODY"
+```
+
+提交：
+
+```bash
+POLICY_RESP="$BASE/policy-update-0.1.3.json"
+
+curl -fsS -o "$POLICY_RESP" -X PUT "$API/v1/admin/channels/beta/policy" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary "@$POLICY_BODY"
+
+cat "$POLICY_RESP"
+```
+
+如果返回 409 `POLICY_REVISION_CONFLICT`，重新执行 10.6 的读取和生成步骤，使用新的
+`policy_revision` 重试一次；不要盲目覆盖。
+
+### 10.7 验证 0.1.2 能看到 0.1.3
+
+```bash
+POLICY_AFTER="$BASE/policy-after-0.1.3.json"
+
+curl -fsS -H "X-Installation-ID: $INSTALLATION_ID" \
+  -o "$POLICY_AFTER" \
+  "$API/v1/update-policy/beta/windows/x86_64/0.1.2?installer=nsis"
+
+node -e '
+const fs = require("fs");
+const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+console.log(JSON.stringify({
+  policy_revision: p.policy_revision,
+  update_available: p.update_available,
+  selected_version: p.selected_release ? p.selected_release.version : null,
+  rollout_release_id: p.selected_release ? p.selected_release.release_id : null,
+  min_supported_version: p.min_supported_version
+}, null, 2));
+if (!p.update_available || !p.selected_release || p.selected_release.version !== "0.1.3") {
+  process.exit(2);
+}
+' "$POLICY_AFTER"
+```
+
+必须看到 `update_available: true`、`selected_version: "0.1.3"`。命令退出码为 `2` 时不要
+继续让用户升级，检查策略/release 状态。
+
+### 10.8 客户端操作
+
+已安装的 0.1.2 客户端配置应为：
+
+```toml
+[update]
+base_url = "http://8.159.158.144:8787"
+channel = "beta"
+auto_check = true
+auto_download = false
+allow_insecure_http = true
+```
+
+操作：
+
+1. 打开“更新”页，点击“检查更新”；自动检查间隔默认 3600 秒；
+2. 发现 0.1.3 后点击下载；
+3. 下载完成并验签后点击安装；
+4. 安装器退出应用并重启，版本变为 0.1.3。
+
+`auto_download = false` 时不会自动下载；即使改为 `true`，仍需用户确认安装。当前实现不做
+无人值守安装。
+
+### 10.9 失败处理
+
+| 错误 | 处理 |
+| --- | --- |
+| `ARTIFACT_UNREACHABLE` | 检查服务器能否访问 manifest URL；不能则按 10.3 用本地 artifact |
+| `SIGNING_KEY_NOT_CONFIGURED` | 第 6 节配置缺失或服务未重启 |
+| `INVALID_ARTIFACT_SIGNATURE` | `.sig`、签名版本或服务端公钥不匹配；停止，不要发布 |
+| `RELEASE_VERSION_EXISTS` | 该版本已登记，停止并报告，不要重复创建 |
+| `POLICY_REVISION_CONFLICT` | 重新读取 policy revision，重试一次 |
+| `/v1/admin/*` 返回 401 | admin token 错误或服务端未加载新配置 |
+
+发布成功后仍然不要立即把 `min_supported_version` 提高到 `0.1.3`；等确认客户端升级完成后再
+调整，否则未升级的 0.1.2 会立即被限制新增报单。
