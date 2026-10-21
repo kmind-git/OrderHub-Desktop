@@ -430,7 +430,7 @@ BASE=/home/orderhub-updater
 DATA=/home/orderhub-updater/data
 API=http://127.0.0.1:8787
 
-TOKEN=$(sed -n 's/^ORDERHUB_UPDATER_ADMIN_TOKEN=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
+TOKEN=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}ORDERHUB_UPDATER_ADMIN_TOKEN=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
 test -n "$TOKEN" || { echo "admin token missing; stop and report"; exit 1; }
 echo "admin token loaded (not printed)"
 ```
@@ -547,8 +547,9 @@ RESP="$BASE/release-register-0.1.3.json"
 curl -fsS -o "$RESP" -X POST "$API/v1/admin/releases" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  --data-binary "@$MANIFEST"
+  --data-binary "@$MANIFEST" || { cat "$RESP" 2>/dev/null; echo "register failed"; exit 1; }
 
+test -s "$RESP" || { echo "register failed; see response above"; exit 1; }
 cat "$RESP"
 ```
 
@@ -568,6 +569,8 @@ const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 process.stdout.write(String(r.revision));
 ' "$RESP")
 
+test -n "$RELEASE_ID" || { echo "release_id missing; stop"; exit 1; }
+test -n "$RELEASE_REV" || { echo "release revision missing; stop"; exit 1; }
 echo "RELEASE_ID=$RELEASE_ID RELEASE_REV=$RELEASE_REV"
 ```
 
@@ -587,8 +590,9 @@ PUBLISH="$BASE/release-publish-0.1.3.json"
 curl -fsS -o "$PUBLISH" -X POST "$API/v1/admin/releases/$RELEASE_ID/publish" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  --data "{\"expected_revision\":$RELEASE_REV}"
+  --data "{\"expected_revision\":$RELEASE_REV}" || { cat "$PUBLISH" 2>/dev/null; echo "publish failed"; exit 1; }
 
+test -s "$PUBLISH" || { echo "publish failed; see response above"; exit 1; }
 cat "$PUBLISH"
 ```
 
@@ -642,8 +646,9 @@ POLICY_RESP="$BASE/policy-update-0.1.3.json"
 curl -fsS -o "$POLICY_RESP" -X PUT "$API/v1/admin/channels/beta/policy" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  --data-binary "@$POLICY_BODY"
+  --data-binary "@$POLICY_BODY" || { cat "$POLICY_RESP" 2>/dev/null; echo "policy update failed"; exit 1; }
 
+test -s "$POLICY_RESP" || { echo "policy update failed; see response above"; exit 1; }
 cat "$POLICY_RESP"
 ```
 
