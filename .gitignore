@@ -18,6 +18,7 @@ config/tls/client-token.txt
 logs/
 data/
 test-artifacts/runtime/
+test-artifacts/runtime-*/
 test-artifacts/artifacts/
 test-artifacts/keys/
 test-artifacts/tools/
