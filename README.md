@@ -50,7 +50,7 @@ v0.1.3 包含 2026-10-20 代码评审的状态一致性、请求恢复、发布�
 
 > 这是内部试装预发布版本，使用测试 updater 签名密钥，未做 Authenticode 签名；安装包不包含
 > 业务配置或凭证。运行前必须提供 `config/` 或设置 `ORDERHUB_CONFIG_DIR`。详见
-> [发布说明](docs/release-notes-v0.1.3.md)。
+> [发布说明](docs/release-notes-v0.1.3.md) · [从 v0.1.2 升级](docs/upgrade-v0.1.2-to-v0.1.3.md)。
 
 ## 更新服务部署包（CentOS Stream）
 

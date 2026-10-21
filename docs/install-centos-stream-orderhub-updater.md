@@ -72,7 +72,7 @@ sha256sum "$ARCHIVE"
 SHA-256 应为：
 
 ```text
-dd5be2a2b3639bea965c208ef41804491b982bf758b556568dfeadc01eb97eaf
+716c863e03db99a466cc11e7393d3925086f5fa6777e675dc49f91e87a75cb93
 ```
 
 ### 1.6 端口占用
@@ -236,3 +236,68 @@ curl -fsS http://8.159.158.144:8787/readyz
 ```
 
 如果本机成功、远端失败，检查 `ORDERHUB_UPDATER_HOST=0.0.0.0` 和 8787 端口是否可达。
+
+## 7. 从旧版更新服务升级
+
+升级只替换程序文件，保留 `config/orderhub-updater.env` 和 `data/`。先备份：
+
+```bash
+BASE_DIR=/home/orderhub-updater
+APP_DIR="$BASE_DIR/app"
+CONFIG_DIR="$BASE_DIR/config"
+DATA_DIR="$BASE_DIR/data"
+STAMP=$(date +%Y%m%d-%H%M%S)
+
+sudo systemctl stop orderhub-updater
+sudo cp -a "$APP_DIR" "$BASE_DIR/app.bak.$STAMP"
+sudo cp -a "$CONFIG_DIR/orderhub-updater.env" "$BASE_DIR/orderhub-updater.env.bak.$STAMP"
+sudo cp -a "$DATA_DIR" "$BASE_DIR/data.bak.$STAMP"
+```
+
+把新压缩包上传到 `/home/orderhub-updater`，核对 SHA-256 后覆盖解压：
+
+```bash
+ARCHIVE="$BASE_DIR/OrderHub-Updater-0.1.3-centos-stream.tar.gz"
+sha256sum "$ARCHIVE"
+# 应为 716c863e03db99a466cc11e7393d3925086f5fa6777e675dc49f91e87a75cb93
+
+sudo tar -xzf "$ARCHIVE" -C "$APP_DIR"
+sudo chown -R root:root "$APP_DIR"
+sudo chmod 0755 "$APP_DIR/start.sh"
+```
+
+编辑现有环境文件，只补新增项，不要覆盖数据库和安装包路径：
+
+```bash
+sudo vi "$CONFIG_DIR/orderhub-updater.env"
+```
+
+```text
+ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1
+ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=RWRtAgrMQPWrFtbBoKP7cyFHWFGbcWblw9XI6gsbRDZ5W37wqu/CeQw6
+```
+
+`SIGNING_PUBLIC_KEY` 必须与客户端 `tauri.conf.json` 里的 updater `pubkey` 配对。当前测试密钥
+对应上面这行；换成正式密钥时，客户端和服务端必须同时替换。
+
+启动并验证：
+
+```bash
+sudo systemctl start orderhub-updater
+sudo systemctl status orderhub-updater --no-pager
+sudo journalctl -u orderhub-updater -n 50 --no-pager
+curl -fsS http://127.0.0.1:8787/healthz
+curl -fsS http://127.0.0.1:8787/readyz
+```
+
+失败时回滚：
+
+```bash
+sudo systemctl stop orderhub-updater
+sudo rm -rf "$APP_DIR"
+sudo mv "$BASE_DIR/app.bak.$STAMP" "$APP_DIR"
+sudo systemctl start orderhub-updater
+```
+
+升级服务代码不会自动发布桌面版本。还需要用发布 CLI 登记、发布 `v0.1.3` 安装包，并把 beta
+通道策略指向该 release，客户端才会从 0.1.2 自动升级。
