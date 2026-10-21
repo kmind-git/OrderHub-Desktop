@@ -344,6 +344,9 @@ pub async fn run_session(shared: Arc<SessionShared>, events: Channel<SessionEven
     let mut backoff = Backoff::new();
     let mut channel: Option<GrpcChannel> = None;
     let mut need_snapshot = true;
+    // Only the opening handshake is bounded. The long-lived stream keeps its
+    // own stall timeout after it has been established.
+    let watch_open_timeout = settings.connect_timeout.max(Duration::from_secs(15));
 
     loop {
         if shared.cancel.is_cancelled() {
@@ -391,9 +394,18 @@ pub async fn run_session(shared: Arc<SessionShared>, events: Channel<SessionEven
                 Some("正在获取完整快照（含活动订单分页）".into()),
                 None,
             );
-            match grpc::fetch_snapshot(&grpc_channel, &settings, shared.generation).await {
+            match grpc::fetch_snapshot(
+                &grpc_channel,
+                &settings,
+                shared.generation,
+                Some(&shared.cancel),
+            )
+            .await
+            {
                 Ok(baseline) => {
-                    let stale = baseline.dto.stale;
+                    if shared.cancel.is_cancelled() {
+                        return;
+                    }
                     let readiness = baseline.dto.readiness.clone();
                     let writable = baseline.dto.writable;
                     shared.set_baseline(baseline);
@@ -402,18 +414,20 @@ pub async fn run_session(shared: Arc<SessionShared>, events: Channel<SessionEven
                         shared.cancel.cancel();
                         return;
                     }
-                    let phase = if stale { "stale" } else { "synced" };
-                    let detail = if stale {
-                        Some(
-                            "服务端返回 stale=true；新增报单已关闭，查询与撤单仍由服务端决定"
-                                .into(),
-                        )
-                    } else {
+                    // A snapshot alone is not business readiness: WatchEvents
+                    // must be established before the session may accept new
+                    // orders, otherwise the client can act while every later
+                    // event is missing. Keep the session in `syncing` until the
+                    // stream response headers arrive.
+                    let _ = emit_status(
+                        &shared,
+                        &events,
+                        "syncing",
                         Some(format!(
-                            "快照已建立，readiness={readiness}，writable={writable}"
-                        ))
-                    };
-                    let _ = emit_status(&shared, &events, phase, detail, None);
+                            "快照已建立（readiness={readiness}，writable={writable}），正在建立事件流"
+                        )),
+                        None,
+                    );
                     need_snapshot = false;
                     backoff.reset();
                 }
@@ -442,17 +456,22 @@ pub async fn run_session(shared: Arc<SessionShared>, events: Channel<SessionEven
         }
 
         let checkpoint = shared.checkpoint();
-        let stream = match grpc::open_watch(
-            &grpc_channel,
-            &settings,
-            &checkpoint.seq,
-            &checkpoint.epoch,
-            &checkpoint.token,
-        )
-        .await
-        {
-            Ok(stream) => stream,
-            Err(error) => {
+        let opened = tokio::select! {
+            _ = shared.cancel.cancelled() => return,
+            result = tokio::time::timeout(
+                watch_open_timeout,
+                grpc::open_watch(
+                    &grpc_channel,
+                    &settings,
+                    &checkpoint.seq,
+                    &checkpoint.epoch,
+                    &checkpoint.token,
+                ),
+            ) => result,
+        };
+        let stream = match opened {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) => {
                 if is_auth_failure(&error) {
                     let _ = emit_status(
                         &shared,
@@ -487,8 +506,31 @@ pub async fn run_session(shared: Arc<SessionShared>, events: Channel<SessionEven
                 sleep_or_cancel(&shared.cancel, backoff.delay()).await;
                 continue;
             }
+            Err(_) => {
+                let error = IpcError::new(
+                    crate::dto::ErrorCategory::Transport,
+                    "WATCH_OPEN_TIMEOUT",
+                    format!(
+                        "事件流在 {} 秒内没有返回响应头，已取消并准备重试",
+                        watch_open_timeout.as_secs()
+                    ),
+                )
+                .retryable(true);
+                let _ = emit_status(
+                    &shared,
+                    &events,
+                    "reconnecting",
+                    Some("事件流建立超时".into()),
+                    Some(error),
+                );
+                sleep_or_cancel(&shared.cancel, backoff.delay()).await;
+                continue;
+            }
         };
 
+        if shared.cancel.is_cancelled() {
+            return;
+        }
         let phase = shared
             .baseline()
             .map(|baseline| {

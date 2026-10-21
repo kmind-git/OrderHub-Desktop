@@ -275,6 +275,7 @@ let requests: RequestRecordDto[] = [
     updatedAt: "2026-10-19T12:04:12Z",
     lastLookupAt: null,
     lookupAttempts: 0,
+    revision: 1,
     clientOrderId: "O-8123456789012345678-000000000011",
   },
   {
@@ -298,6 +299,7 @@ let requests: RequestRecordDto[] = [
     updatedAt: "2026-10-19T12:06:50Z",
     lastLookupAt: null,
     lookupAttempts: 0,
+    revision: 1,
     clientOrderId: "O-8123456789012345678-000000000012",
   },
   {
@@ -331,6 +333,7 @@ let requests: RequestRecordDto[] = [
     updatedAt: "2026-10-19T12:08:03Z",
     lastLookupAt: null,
     lookupAttempts: 0,
+    revision: 1,
     clientOrderId: null,
   },
 ];
@@ -400,6 +403,7 @@ function bootstrap(): BootstrapState {
     connection,
     update: updateState,
     requests: [...requests],
+    requestRecovery: { ready: true, loading: false, total: requests.length, unknown: 1, loadErrors: [] },
     diagnostics: makeDiagnostics(),
   };
 }
@@ -514,6 +518,7 @@ export const demoBackend: Backend = {
   async lookupOrder(orderIds) {
     const all = [...orders, terminalOrder];
     return {
+      generation: connection.generation,
       orders: all.filter((order) => orderIds.includes(order.clientOrderId)),
       journalEpoch: snapshot.journalEpoch,
       stateCursor: "4824",
@@ -566,7 +571,22 @@ export const demoBackend: Backend = {
     };
   },
   async listRequests() {
-    return [...requests];
+    return {
+      records: [...requests],
+      recovery: {
+        ready: true,
+        loading: false,
+        total: requests.length,
+        unknown: 1,
+        loadErrors: [],
+      },
+    };
+  },
+  async getRequestRecovery() {
+    return { ready: true, loading: false, total: requests.length, unknown: 1, loadErrors: [] };
+  },
+  async checkUpdatePolicy() {
+    return updateState;
   },
   async checkUpdate() {
     updateState = {

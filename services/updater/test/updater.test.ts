@@ -25,6 +25,7 @@ function testConfig(root: string, overrides: Partial<UpdaterConfig> = {}): Updat
     serveArtifacts: true,
     verifyArtifactUrl: false,
     allowInsecureArtifactUrl: false,
+    signingPublicKey: null,
     eventRetentionDays: 30,
     policyDefaultValidForSeconds: 3600,
     supportUrl: "https://support.example.com/orderhub",

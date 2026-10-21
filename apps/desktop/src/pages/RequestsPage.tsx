@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { RequestRecordDto, RequestStatus } from "@orderhub/contracts";
 import { useApp } from "../app/AppProvider";
 import { Icon } from "../components/Icon";
@@ -42,6 +42,13 @@ export function RequestsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const recovery = state.requestRecovery;
+
+  // Bootstrap deliberately carries only a recent window. The detailed list is
+  // loaded when this page is opened, and again when native recovery finishes.
+  useEffect(() => {
+    if (recovery?.ready) void refreshRequests();
+  }, [recovery?.ready, refreshRequests]);
 
   const counts = useMemo(() => {
     const result: Record<string, number> = {
@@ -130,6 +137,22 @@ export function RequestsPage() {
         仅表示查询时尚无可见结果，不能证明请求没有执行。环境、凭证或 epoch 变化后，旧请求会保留为待人工核对。
       </Callout>
 
+      {recovery && recovery.loadErrors.length > 0 ? (
+        <Callout tone="danger" title="有本地请求记录无法读取" icon="alert">
+          <p>
+            这些文件没有被删除，但已作为“结果未知”列入请求列表并计入待核对数量。请保留文件并提供诊断导出，
+            不要把它们当作不存在。
+          </p>
+          <ul>
+            {recovery.loadErrors.slice(0, 5).map((error) => (
+              <li className="mono small" key={error}>
+                {error}
+              </li>
+            ))}
+          </ul>
+        </Callout>
+      ) : null}
+
       <div className="metric-grid metric-grid-4">
         <Metric label="全部请求" value={<span className="mono">{counts.all}</span>} />
         <Metric
@@ -155,7 +178,11 @@ export function RequestsPage() {
       <Panel
         title="本地请求记录"
         subtitle="按创建时间倒序；内容使用 Windows DPAPI 保护，升级时保留。"
-        actions={<Badge tone="muted">当前已加载数据</Badge>}
+        actions={
+          <Badge tone={recovery?.ready ? "muted" : "warn"}>
+            {recovery?.ready ? "当前已加载数据" : "正在恢复本地记录"}
+          </Badge>
+        }
       >
         <div className="table-toolbar">
           <label className="search-field">

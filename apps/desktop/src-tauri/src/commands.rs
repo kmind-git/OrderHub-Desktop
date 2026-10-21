@@ -1,4 +1,4 @@
-use crate::config::{load_config, require_connection, ConnectionSettings, LoadedConfig};
+use crate::config::{load_config, require_connection, LoadedConfig};
 use crate::decimal::{validate_contract_step, DecimalValue};
 use crate::diagnostics;
 use crate::dto::{
@@ -6,8 +6,8 @@ use crate::dto::{
     ConfigSummary, ConnectionState, DiagnosticExportResult, DiagnosticsSummary,
     DownloadProgressDto, DownloadUpdateResult, ErrorCategory, ExportDiagnosticsInput,
     InstallUpdateInput, InstallUpdateResult, IpcError, ListRequestsResult, OrderLookupResult,
-    ParamValue, RequestLookupResult, RequestMethod, SessionEvent, SubmitOrderInput,
-    SubmitOrderResult, UpdateCheckResult, UpdateStateDto,
+    ParamValue, RequestLookupResult, RequestMethod, RequestRecoveryDto, SessionEvent,
+    SubmitOrderInput, SubmitOrderResult, UpdateCheckResult, UpdateStateDto,
 };
 use crate::error::{state_error, validation_error, AppResult};
 use crate::grpc::{self, pb};
@@ -30,12 +30,17 @@ fn current_session(state: &AppState) -> AppResult<Arc<SessionShared>> {
         .ok_or_else(|| state_error("SESSION_NOT_CONNECTED", "尚未连接业务服务"))
 }
 
-fn settings(state: &AppState) -> AppResult<ConnectionSettings> {
-    let config = state
-        .config
-        .read()
-        .unwrap_or_else(|poison| poison.into_inner());
-    require_connection(&config)
+/// The session Arc is immutable, but `reload_config`/`connect`/`disconnect`
+/// can replace it after a command captured it. Recheck immediately before the
+/// network write so an old channel is never used for a new session generation.
+fn ensure_session_current(state: &AppState, session: &SessionShared) -> AppResult<()> {
+    if state.generation.load(Ordering::SeqCst) != session.generation {
+        return Err(state_error(
+            "SESSION_GENERATION_CHANGED",
+            "业务会话已切换，本次操作未发送",
+        ));
+    }
+    Ok(())
 }
 
 fn connection_for(state: &AppState) -> ConnectionState {
@@ -89,6 +94,16 @@ fn sync_diagnostics(
     }
 }
 
+fn request_recovery(state: &AppState) -> RequestRecoveryDto {
+    RequestRecoveryDto {
+        ready: state.requests.is_ready(),
+        loading: state.requests.is_loading(),
+        total: state.requests.count(),
+        unknown: state.requests.unknown_count(),
+        load_errors: state.requests.load_errors(),
+    }
+}
+
 fn build_diagnostics(state: &AppState, session: Option<&Arc<SessionShared>>) -> DiagnosticsSummary {
     let config = state
         .config
@@ -107,7 +122,7 @@ fn build_diagnostics(state: &AppState, session: Option<&Arc<SessionShared>>) -> 
         crate::dto::DiagnosticsRuntime {
             data_dir: state.data_dir.to_string_lossy().to_string(),
             installation_id_ref: state.update.installation_id_ref(),
-            request_record_count: state.requests.list().len(),
+            request_record_count: state.requests.count(),
             unknown_request_count: state.requests.unknown_count(),
         },
         &state.diagnostics,
@@ -135,7 +150,8 @@ pub async fn get_bootstrap_state(state: State<'_, AppState>) -> AppResult<Bootst
             .map(|session| session.connection())
             .unwrap_or_else(|| connection_for(&state)),
         update: state.update.current_state(),
-        requests: state.requests.list(),
+        requests: state.requests.recent(50),
+        request_recovery: request_recovery(&state),
         diagnostics: summary,
     })
 }
@@ -163,10 +179,15 @@ pub async fn reload_config(state: State<'_, AppState>) -> AppResult<ConfigSummar
         }
     }
     state.generation.fetch_add(1, Ordering::SeqCst);
+    let update_settings = loaded.update.clone();
     *state
         .config
         .write()
         .unwrap_or_else(|poison| poison.into_inner()) = loaded;
+    // The update manager owns a separate settings snapshot. Without this the
+    // UI could report a new base URL/channel while the manager kept using the
+    // values loaded at process start.
+    state.update.reconfigure(update_settings).await;
     let config = state
         .config
         .read()
@@ -270,10 +291,14 @@ pub async fn lookup_order(
     validate_order_ids(&order_ids)
         .map_err(|message| validation_error("ORDER_IDS_INVALID", message))?;
     let session = current_session(&state)?;
-    let connection = settings(&state)?;
+    // The channel, credentials and returned views must all belong to the same
+    // immutable session. Reading global config here could pair an old gRPC
+    // channel with a token loaded by a concurrent reload.
+    let connection = require_connection(&session.config)?;
     let channel = session
         .channel()
         .ok_or_else(|| state_error("SESSION_NOT_READY", "业务连接尚未建立"))?;
+    ensure_session_current(&state, &session)?;
     let response = grpc::lookup_orders(&channel, &connection, order_ids)
         .await
         .map_err(|mut error| {
@@ -282,6 +307,7 @@ pub async fn lookup_order(
             error
         })?;
     Ok(OrderLookupResult {
+        generation: session.generation,
         orders: response
             .active_orders
             .iter()
@@ -412,6 +438,12 @@ pub async fn submit_order(
             "应用正在准备安装更新，暂不接受新写入",
         ));
     }
+    if !state.requests.is_ready() {
+        return Err(state_error(
+            "REQUEST_RECOVERY_PENDING",
+            "本地请求记录仍在恢复；在完成前不会新增报单，以免把未知请求当成零",
+        ));
+    }
     let session = current_session(&state)?;
     if session.generation != input.expected_generation {
         return Err(state_error(
@@ -462,7 +494,7 @@ pub async fn submit_order(
         ));
     }
     let (quantity, price) = validate_submit_input(&input, &baseline.snapshot)?;
-    let settings = settings(&state)?;
+    let settings = require_connection(&session.config)?;
     let channel = session
         .channel()
         .ok_or_else(|| state_error("SESSION_NOT_READY", "业务连接尚未建立"))?;
@@ -505,6 +537,11 @@ pub async fn submit_order(
     mark_sending(&mut record);
     if let Err(mut error) = state.requests.update(record.clone()) {
         error.correlation_id = session.correlation_id.clone();
+        return Err(error);
+    }
+    if let Err(error) = ensure_session_current(&state, &session) {
+        apply_failure(&mut record, error.clone(), true);
+        let _ = state.requests.update(record);
         return Err(error);
     }
     let request = pb::SubmitOrderRequest {
@@ -590,6 +627,12 @@ pub async fn cancel_order(
     }
     validate_id(&input.client_order_id, "订单 ID")
         .map_err(|message| validation_error("ORDER_ID_INVALID", message))?;
+    if !state.requests.is_ready() {
+        return Err(state_error(
+            "REQUEST_RECOVERY_PENDING",
+            "本地请求记录仍在恢复；在完成前不会新增撤单",
+        ));
+    }
     let session = current_session(&state)?;
     if session.generation != input.expected_generation {
         return Err(state_error(
@@ -619,7 +662,7 @@ pub async fn cancel_order(
             "该订单不在当前活动订单中，可能已终态；请先查询订单状态",
         ));
     }
-    let settings = settings(&state)?;
+    let settings = require_connection(&session.config)?;
     let channel = session
         .channel()
         .ok_or_else(|| state_error("SESSION_NOT_READY", "业务连接尚未建立"))?;
@@ -646,6 +689,11 @@ pub async fn cancel_order(
     mark_sending(&mut record);
     if let Err(mut error) = state.requests.update(record.clone()) {
         error.correlation_id = session.correlation_id.clone();
+        return Err(error);
+    }
+    if let Err(error) = ensure_session_current(&state, &session) {
+        apply_failure(&mut record, error.clone(), true);
+        let _ = state.requests.update(record);
         return Err(error);
     }
     let request = pb::CancelOrderRequest {
@@ -704,6 +752,12 @@ pub async fn lookup_session_request(
 ) -> AppResult<RequestLookupResult> {
     validate_id(&request_id, "request_id")
         .map_err(|message| validation_error("REQUEST_ID_INVALID", message))?;
+    if !state.requests.is_ready() {
+        return Err(state_error(
+            "REQUEST_RECOVERY_PENDING",
+            "本地请求记录仍在恢复，暂不能查询原请求",
+        ));
+    }
     let mut record = state
         .requests
         .get(&request_id)
@@ -738,19 +792,45 @@ pub async fn lookup_session_request(
     record.lookup_attempts = record.lookup_attempts.saturating_add(1);
     record.last_lookup_at = Some(chrono::Utc::now().to_rfc3339());
     let looked_up_at = chrono::Utc::now().to_rfc3339();
+
+    let save_lookup = |record: &crate::dto::RequestRecordDto| {
+        state
+            .requests
+            .update(record.clone())
+            .err()
+            .map(|mut error| {
+                error.message = format!(
+                    "服务端结果已取得，但本地请求记录保存失败：{}",
+                    error.message
+                );
+                state.diagnostics.record(&error);
+                error
+            })
+    };
+    let current_record = |fallback: crate::dto::RequestRecordDto| {
+        state.requests.get(&fallback.request_id).unwrap_or(fallback)
+    };
+
     match lookup {
         Ok(response) => {
             if let Some(result) = response.request_result {
                 let admission = grpc::map_admission_response(result);
                 apply_admission(&mut record, admission.clone());
-                let _ = state.requests.update(record.clone());
+                let persist_error = save_lookup(&record);
+                // If persistence failed, still return the result we just
+                // learned; the UI must not present an older Unknown view.
+                let record = if persist_error.is_some() {
+                    record
+                } else {
+                    current_record(record)
+                };
                 Ok(RequestLookupResult {
                     record,
                     found: true,
                     admission: Some(admission),
                     state_cursor: Some(response.state_cursor),
                     looked_up_at,
-                    error: None,
+                    error: persist_error,
                 })
             } else {
                 let error = IpcError::new(
@@ -758,14 +838,25 @@ pub async fn lookup_session_request(
                     "REQUEST_LOOKUP_EMPTY",
                     "RequestLookup 没有返回 request_result，不能据此判断请求已执行",
                 );
-                let _ = state.requests.update(record.clone());
+                // A lookup that produced no result leaves the request
+                // unresolved; it may not keep claiming "sending".
+                if record.admission.is_none() {
+                    record.status = crate::dto::RequestStatus::Unknown;
+                }
+                record.error = Some(error.clone());
+                let persist_error = save_lookup(&record);
+                let record = if persist_error.is_some() {
+                    record
+                } else {
+                    current_record(record)
+                };
                 Ok(RequestLookupResult {
                     record,
                     found: false,
                     admission: None,
                     state_cursor: Some(response.state_cursor),
                     looked_up_at,
-                    error: Some(error),
+                    error: Some(persist_error.unwrap_or(error)),
                 })
             }
         }
@@ -788,14 +879,23 @@ pub async fn lookup_session_request(
                 .retryable(false);
             }
             state.diagnostics.record(&error);
-            let _ = state.requests.update(record.clone());
+            if record.admission.is_none() {
+                record.status = crate::dto::RequestStatus::Unknown;
+            }
+            record.error = Some(error.clone());
+            let persist_error = save_lookup(&record);
+            let record = if persist_error.is_some() {
+                record
+            } else {
+                current_record(record)
+            };
             Ok(RequestLookupResult {
                 record,
                 found: false,
                 admission: None,
                 state_cursor: None,
                 looked_up_at,
-                error: Some(error),
+                error: Some(persist_error.unwrap_or(error)),
             })
         }
     }
@@ -805,7 +905,19 @@ pub async fn lookup_session_request(
 pub async fn list_requests(state: State<'_, AppState>) -> AppResult<ListRequestsResult> {
     Ok(ListRequestsResult {
         records: state.requests.list(),
+        recovery: request_recovery(&state),
     })
+}
+
+#[tauri::command]
+pub async fn get_request_recovery(state: State<'_, AppState>) -> AppResult<RequestRecoveryDto> {
+    Ok(request_recovery(&state))
+}
+
+#[tauri::command]
+pub async fn check_update_policy(state: State<'_, AppState>) -> AppResult<UpdateStateDto> {
+    let result = state.update.refresh_policy().await?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -840,50 +952,56 @@ pub async fn install_update(
     app: AppHandle,
     input: InstallUpdateInput,
 ) -> AppResult<InstallUpdateResult> {
-    if state.maintenance.load(Ordering::SeqCst) {
+    // Enter maintenance before looking at the unknown set. Waiting for the
+    // write gate after counting allowed a request that had already passed its
+    // pre-check to finish and become Unknown while installation proceeded.
+    if state
+        .maintenance
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return Err(state_error("MAINTENANCE_MODE", "已进入安装维护状态"));
     }
-    let unknown = state.requests.unknown_count();
-    if unknown > 0 && !input.confirm_unknown_requests {
-        return Err(IpcError::new(
-            ErrorCategory::Policy,
-            "UNKNOWN_REQUESTS_PENDING",
-            format!(
-                "还有 {unknown} 条等待受理或结果未知的请求；请先查询原请求，或明确确认后再安装。"
-            ),
-        ));
-    }
-    state.maintenance.store(true, Ordering::SeqCst);
-    let prepared = state
-        .update
-        .prepare_install(&app, input.confirm_unknown_requests, unknown)
-        .await;
-    let (update, bytes) = match prepared {
-        Ok(value) => value,
-        Err(error) => {
-            state.maintenance.store(false, Ordering::SeqCst);
-            state.diagnostics.record(&error);
-            return Err(error);
+    let outcome = async {
+        // Admitted writes finish first; new ones observe maintenance and fail
+        // their post-guard check.
+        let _write_guard = state.write_gate.write().await;
+        if !state.requests.is_ready() {
+            return Err(state_error(
+                "REQUEST_RECOVERY_PENDING",
+                "本地请求记录仍在恢复，暂不能确认未知请求并安装更新",
+            ));
         }
-    };
-    // Wait for writes that were already admitted before starting the installer.
-    let _write_guard = state.write_gate.write().await;
-    if let Some(session) = state
-        .session
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .take()
-    {
-        session.cancel.cancel();
+        let unknown = state.requests.unknown_count();
+        if unknown > 0 && !input.confirm_unknown_requests {
+            return Err(IpcError::new(
+                ErrorCategory::Policy,
+                "UNKNOWN_REQUESTS_PENDING",
+                format!(
+                    "还有 {unknown} 条等待受理或结果未知的请求；请先查询原请求，或明确确认后再安装。"
+                ),
+            ));
+        }
+        let (update, bytes) = state
+            .update
+            .prepare_install(&app, input.confirm_unknown_requests, unknown)
+            .await?;
+        if let Some(session) = state
+            .session
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take()
+        {
+            session.cancel.cancel();
+        }
+        state.update.install(&app, update, bytes).await
     }
-    let result = state.update.install(&app, update, bytes).await;
-    if result.is_err() {
+    .await;
+    if let Err(error) = &outcome {
         state.maintenance.store(false, Ordering::SeqCst);
-    }
-    if let Err(error) = &result {
         state.diagnostics.record(error);
     }
-    result
+    outcome
 }
 
 #[tauri::command]

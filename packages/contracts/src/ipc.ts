@@ -303,6 +303,8 @@ export interface RequestRecordDto {
   lastLookupAt: string | null;
   lookupAttempts: number;
   clientOrderId: string | null;
+  /** Local merge revision; increases each time the native store persists. */
+  revision: number;
 }
 
 export interface SubmitOrderResult {
@@ -318,6 +320,7 @@ export interface CancelOrderResult {
 }
 
 export interface OrderLookupResult {
+  generation: number;
   orders: OrderViewDto[];
   journalEpoch: string;
   stateCursor: string;
@@ -460,12 +463,22 @@ export interface DiagnosticsSummary {
   recentErrors: Array<{ at: string; category: string; code: string; correlationId: string; message: string }>;
 }
 
+export interface RequestRecoveryDto {
+  ready: boolean;
+  loading: boolean;
+  total: number;
+  unknown: number;
+  loadErrors: string[];
+}
+
 export interface BootstrapState {
   app: AppInfo;
   config: ConfigSummary;
   connection: ConnectionState;
   update: UpdateStateDto;
+  /** Recent window only; the requests page loads the full list on demand. */
   requests: RequestRecordDto[];
+  requestRecovery: RequestRecoveryDto;
   diagnostics: DiagnosticsSummary;
 }
 
@@ -489,4 +502,5 @@ export interface CheckUpdateInput {
 
 export interface ListRequestsResult {
   records: RequestRecordDto[];
+  recovery: RequestRecoveryDto;
 }

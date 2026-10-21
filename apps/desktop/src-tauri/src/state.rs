@@ -14,7 +14,7 @@ pub struct AppState {
     pub config: RwLock<LoadedConfig>,
     pub session: Mutex<Option<Arc<SessionShared>>>,
     pub generation: AtomicU64,
-    pub requests: RequestStore,
+    pub requests: Arc<RequestStore>,
     pub update: UpdateManager,
     pub diagnostics: DiagnosticStore,
     pub app_info: AppInfo,

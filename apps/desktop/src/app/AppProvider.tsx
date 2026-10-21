@@ -216,6 +216,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const config = await backend.reloadConfig();
       dispatch({ type: "config", config });
+      // The native updater applies the same reload; pull its reset state so
+      // the gate/phase shown in the UI matches what the manager will use.
+      const nextUpdate = await backend.getUpdateState().catch(() => null);
+      if (nextUpdate) dispatch({ type: "update", update: nextUpdate });
       dispatch({
         type: "connection",
         connection: {
@@ -257,8 +261,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           void connect();
         }
         if (bootstrap.config.update.autoCheck && backend.kind !== "unavailable") {
-          window.setTimeout(async () => {
+          // Do not add an artificial delay before the policy gate is fetched.
+          // Update metadata checks are allowed to finish later; the gate is
+          // published by the native check as soon as the policy is valid.
+          void (async () => {
             try {
+              // Policy first: this is the only part that gates new orders. The
+              // optional release metadata check continues afterwards.
+              const policyState = await backend.checkUpdatePolicy();
+              if (cancelled) return;
+              dispatch({ type: "update", update: policyState });
               const result = await backend.checkUpdate(false);
               if (cancelled) return;
               dispatch({ type: "update", update: result.state });
@@ -280,7 +292,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 });
               }
             }
-          }, 1400);
+          })();
         }
       } catch (error) {
         if (cancelled) return;
@@ -304,6 +316,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const result = await backend.checkUpdate(false);
           dispatch({ type: "update", update: result.state });
+          // Periodic checks must apply the same auto-download policy as the
+          // startup check; otherwise an update found hours later stays manual.
+          if (updateConfig.autoDownload && result.state.phase === "available") {
+            const downloaded = await backend.downloadUpdate((progress) =>
+              dispatch({ type: "downloadProgress", progress }),
+            );
+            dispatch({ type: "update", update: downloaded.state });
+          }
         } catch {
           // A failed background check must not interrupt a live trading session.
         }
@@ -363,11 +383,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const result = await backend.cancelOrder(input);
         dispatch({ type: "requestUpsert", record: result.record });
         if (result.admission) {
+          const accepted = ["ADMITTED", "CANCEL_INTENT_ACCEPTED"].includes(
+            result.admission.result,
+          );
           showToast({
-            tone: "ok",
-            title: "撤单意图已受理",
-            message:
-              "撤单受理不等于撤成；撤单过程中仍可能成交，最终状态以服务端订单状态为准。",
+            tone: accepted ? "ok" : "danger",
+            title: accepted ? "撤单意图已受理" : "撤单被业务拒绝",
+            message: accepted
+              ? "撤单受理不等于撤成；撤单过程中仍可能成交，最终状态以服务端订单状态为准。"
+              : `服务端结果：${result.admission.result}${
+                  result.admission.reason ? `；${result.admission.reason}` : ""
+                }`,
           });
         } else if (result.error) {
           showToast({
@@ -392,11 +418,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (orderIds: string[]) => {
       try {
         const result = await backend.lookupOrder(orderIds);
-        dispatch({ type: "lookupOrders", orders: result.orders });
+        dispatch({
+          type: "lookupOrders",
+          orders: result.orders,
+          generation: result.generation,
+          journalEpoch: result.journalEpoch,
+        });
         return result;
       } catch (error) {
-        showToast({ tone: "danger", title: "订单查询失败", error: toIpcError(error) });
-        throw error;
+        const ipc = toIpcError(error);
+        showToast({ tone: "danger", title: "订单查询失败", error: ipc });
+        throw ipc;
       }
     },
     [backend, showToast],
@@ -412,35 +444,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const lookupRequest = useCallback(
     async (requestId: string) => {
-      const result = await backend.lookupSessionRequest(requestId);
-      dispatch({ type: "requestUpsert", record: result.record });
-      if (result.found) {
+      try {
+        const result = await backend.lookupSessionRequest(requestId);
+        dispatch({ type: "requestUpsert", record: result.record });
+        if (result.found) {
+          showToast({
+            tone: result.error ? "warn" : "ok",
+            title: result.error ? "已查回结果，但本地保存失败" : "已查回原始请求结果",
+            message:
+              result.error?.message ??
+              "该结果是原始受理/拒绝结果，不是订单终态。",
+            error: result.error ?? undefined,
+          });
+        } else {
+          showToast({
+            tone: "warn",
+            title: "请求结果仍未知",
+            message: result.error?.message,
+            error: result.error ?? undefined,
+          });
+        }
+        return result;
+      } catch (error) {
+        const ipc = toIpcError(error);
         showToast({
-          tone: "ok",
-          title: "已查回原始请求结果",
-          message: "该结果是原始受理/拒绝结果，不是订单终态。",
+          tone: "danger",
+          title: "请求查询失败",
+          message: ipc.message,
+          error: ipc,
         });
-      } else {
-        showToast({
-          tone: "warn",
-          title: "请求结果仍未知",
-          message: result.error?.message,
-          error: result.error ?? undefined,
-        });
+        throw ipc;
       }
-      return result;
     },
     [backend, showToast],
   );
 
   const refreshRequests = useCallback(async () => {
     try {
-      const records = await backend.listRequests();
-      dispatch({ type: "requests", records });
+      const result = await backend.listRequests();
+      dispatch({ type: "requests", records: result.records });
+      dispatch({ type: "requestRecovery", recovery: result.recovery });
     } catch (error) {
       showToast({ tone: "danger", title: "读取请求记录失败", error: toIpcError(error) });
     }
   }, [backend, showToast]);
+
+  // Recovery happens on a native worker so the window can render before a
+  // large encrypted request history is decrypted. Poll only the lightweight
+  // status; the requests page fetches the detailed list when opened.
+  const requestRecoveryReady = state.requestRecovery?.ready;
+  useEffect(() => {
+    if (requestRecoveryReady !== false) return;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        const recovery = await backend.getRequestRecovery();
+        if (cancelled) return;
+        dispatch({ type: "requestRecovery", recovery });
+        if (recovery.ready) window.clearInterval(timer);
+      } catch {
+        // The next tick retries; bootstrap already shows the pending state.
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [backend, requestRecoveryReady]);
 
   const checkUpdate = useCallback(
     async (manual: boolean) => {
@@ -487,6 +557,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return result;
     } catch (error) {
       const ipc = toIpcError(error);
+      // The native manager may have failed before it could publish a failed
+      // phase (for example when updater_check fails). Pull the authoritative
+      // state so the page leaves "downloading" and offers a retry.
+      try {
+        const state = await backend.getUpdateState();
+        dispatch({ type: "update", update: state });
+      } catch {
+        dispatch({ type: "downloadFailed", error: ipc });
+      }
       showToast({ tone: "danger", title: "更新下载失败", error: ipc });
       throw ipc;
     }

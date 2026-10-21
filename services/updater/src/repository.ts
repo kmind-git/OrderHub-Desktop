@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import semver from "semver";
 import type { Database } from "./db.js";
 import { withTransaction } from "./db.js";
@@ -6,6 +6,9 @@ import type { PolicyRecord, ReleaseRow, ReleaseStatus, UpdateChannel } from "./d
 import { addSeconds, listCandidates, readPolicy } from "./domain.js";
 import { AppError } from "./errors.js";
 import type { UpdaterConfig } from "./config.js";
+import { verifyArtifactSignature } from "./signature.js";
+
+const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 
 export const SUPPORTED_COMBINATIONS = [
   { target: "windows", arch: "x86_64", installer: "nsis" },
@@ -121,10 +124,6 @@ export function releaseSummary(db: Database, release: ReleaseRow) {
   };
 }
 
-function isLoopbackHost(hostname: string): boolean {
-  return ["127.0.0.1", "::1", "localhost"].includes(hostname);
-}
-
 function validateArtifactUrl(url: string, config: UpdaterConfig): void {
   let parsed: URL;
   try {
@@ -133,17 +132,17 @@ function validateArtifactUrl(url: string, config: UpdaterConfig): void {
     throw new AppError(400, "INVALID_ARTIFACT_URL", "Artifact URL is not a valid absolute URL.");
   }
   if (parsed.protocol === "https:") return;
-  if (
-    parsed.protocol === "http:" &&
-    config.allowInsecureArtifactUrl &&
-    isLoopbackHost(parsed.hostname)
-  ) {
+  // The service startup rule already requires an explicit opt-in for plain
+  // HTTP. Registration and publish must apply the same rule; otherwise the
+  // documented intranet HTTP deployment can start but can never register a
+  // package.
+  if (parsed.protocol === "http:" && config.allowInsecureArtifactUrl) {
     return;
   }
   throw new AppError(
     400,
     "INSECURE_ARTIFACT_URL",
-    "Artifact URL must use HTTPS. HTTP is accepted only for loopback development when explicitly enabled.",
+    "Artifact URL must use HTTPS. HTTP is accepted only when ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL is explicitly enabled.",
   );
 }
 
@@ -274,32 +273,80 @@ export function registerRelease(
   return release;
 }
 
-async function assertArtifactReachable(artifact: ArtifactInput, config: UpdaterConfig): Promise<void> {
+/**
+ * Fetch the final artifact and verify the declared size, SHA-256 and minisign
+ * signature before a release becomes visible to clients. A HEAD reachability
+ * check cannot catch a corrupt or mismatched package.
+ */
+async function assertArtifactIntegrity(
+  artifact: ArtifactInput,
+  version: string,
+  config: UpdaterConfig,
+): Promise<void> {
   if (!config.verifyArtifactUrl) return;
+  if (!config.signingPublicKey) {
+    throw new AppError(
+      503,
+      "SIGNING_KEY_NOT_CONFIGURED",
+      "ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY is required to verify artifacts before publishing.",
+    );
+  }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 60_000);
   try {
-    let response = await fetch(artifact.url, { method: "HEAD", signal: controller.signal, redirect: "follow" });
-    if (response.status === 405 || response.status === 501) {
-      response = await fetch(artifact.url, {
-        method: "GET",
-        headers: { Range: "bytes=0-0" },
-        signal: controller.signal,
-        redirect: "follow",
-      });
-      await response.body?.cancel();
-    }
-    if (!response.ok && response.status !== 206) {
+    const response = await fetch(artifact.url, {
+      method: "GET",
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (!response.ok) {
       throw new AppError(503, "ARTIFACT_UNREACHABLE", "The artifact URL is not readable.", {
         details: { status: String(response.status) },
       });
+    }
+    const lengthHeader = response.headers.get("content-length");
+    if (lengthHeader && Number(lengthHeader) > MAX_ARTIFACT_BYTES) {
+      throw new AppError(413, "ARTIFACT_TOO_LARGE", "The artifact exceeds the 512 MiB verification limit.");
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_ARTIFACT_BYTES) {
+      throw new AppError(413, "ARTIFACT_TOO_LARGE", "The artifact exceeds the 512 MiB verification limit.");
+    }
+    if (bytes.byteLength !== artifact.size) {
+      throw new AppError(
+        409,
+        "ARTIFACT_SIZE_MISMATCH",
+        `Artifact is ${bytes.byteLength} bytes but the release declares ${artifact.size}.`,
+        { details: { actual: String(bytes.byteLength), declared: String(artifact.size) } },
+      );
+    }
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== artifact.sha256.toLowerCase()) {
+      throw new AppError(
+        409,
+        "ARTIFACT_DIGEST_MISMATCH",
+        "Artifact SHA-256 does not match the registered digest.",
+        { details: { actual: digest, declared: artifact.sha256 } },
+      );
+    }
+    try {
+      verifyArtifactSignature(bytes, artifact.signature, {
+        publicKey: config.signingPublicKey,
+        expectedVersion: version,
+      });
+    } catch (error) {
+      throw new AppError(
+        409,
+        "INVALID_ARTIFACT_SIGNATURE",
+        `Artifact signature verification failed: ${(error as Error).message}`,
+      );
     }
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw new AppError(
       503,
       "ARTIFACT_UNREACHABLE",
-      "The artifact URL could not be read before publishing.",
+      "The artifact URL could not be read and verified before publishing.",
       { cause: error },
     );
   } finally {
@@ -347,7 +394,7 @@ export async function publishRelease(
   for (const artifact of artifacts) {
     validateArtifactUrl(artifact.url, config);
     validateSignature(artifact.signature);
-    await assertArtifactReachable(artifact, config);
+    await assertArtifactIntegrity(artifact, release.version, config);
   }
 
   const nowIso = now.toISOString();

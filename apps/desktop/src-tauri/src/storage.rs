@@ -130,8 +130,9 @@ pub fn harden_directory_acl(path: &Path) -> Result<(), String> {
     // existing files reliably, which made encrypted request records
     // unreadable after the next startup. %LOCALAPPDATA% is already user-scoped.
     use std::os::windows::process::CommandExt;
+    use std::time::{Duration, Instant};
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let output = std::process::Command::new("icacls")
+    let mut child = std::process::Command::new("icacls")
         .arg(path)
         .arg("/grant:r")
         .arg(format!("{username}:(OI)(CI)F"))
@@ -140,14 +141,34 @@ pub fn harden_directory_acl(path: &Path) -> Result<(), String> {
         // The GUI process has no console. Without this flag Windows creates a
         // short-lived console window for the child process on every launch.
         .creation_flags(CREATE_NO_WINDOW)
-        .output()
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .map_err(|error| format!("icacls 无法运行：{error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "icacls 返回 {}：{}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    // This is a best-effort repair on a background thread, but a hung icacls
+    // must not hold that worker forever. The directory is user-scoped already
+    // and DPAPI still protects the records, so timing out is safe.
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < Duration::from_secs(8) => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("icacls 超过 8 秒未完成，已终止".into());
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("等待 icacls 失败：{error}"));
+            }
+        }
+    };
+    if !status.success() {
+        return Err(format!("icacls 返回 {status}"));
     }
     let _ = std::fs::write(&marker, b"1");
     Ok(())

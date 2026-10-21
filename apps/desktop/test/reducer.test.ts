@@ -126,6 +126,13 @@ function bootstrapped() {
       },
       update,
       requests: [],
+      requestRecovery: {
+        ready: true,
+        loading: false,
+        total: 0,
+        unknown: 0,
+        loadErrors: [],
+      },
       diagnostics: {} as never,
     },
   });
@@ -260,6 +267,93 @@ describe("session reducer", () => {
       },
     });
     expect(lateConnecting.connection.phase).toBe("synced");
+  });
+
+  it("ignores status and snapshot messages from an older generation", () => {
+    const state = bootstrapped();
+    const staleStatus = uiReducer(state, {
+      type: "connection",
+      connection: {
+        generation: 2,
+        phase: "synced",
+        changedAt: "2026-10-19T00:02:00Z",
+      },
+    });
+    expect(staleStatus.connection.generation).toBe(3);
+
+    const staleSnapshot = uiReducer(state, {
+      type: "snapshot",
+      snapshot: {
+        ...snapshot,
+        generation: 2,
+        positions: [
+          {
+            strategyId: "S-1",
+            instrumentId: "AAPL.GOX",
+            quantity: "999",
+            cost: "0",
+            reservedQuantity: "0",
+          },
+        ],
+      },
+    });
+    expect(staleSnapshot.positions).toEqual([]);
+    expect(staleSnapshot.snapshot?.generation).toBe(3);
+  });
+
+  it("does not let a late lookup move an order backwards", () => {
+    const filled = uiReducer(bootstrapped(), {
+      type: "journal",
+      event: event({
+        seq: "4821",
+        eventId: "8123:4821:filled",
+        view: {
+          order: {
+            ...order,
+            status: "FILLED",
+            filledQuantity: "100",
+            remainingQuantity: "0",
+            version: "20",
+          },
+        },
+      }),
+    });
+    const late = uiReducer(filled, {
+      type: "lookupOrders",
+      generation: 3,
+      journalEpoch: "8123",
+      orders: [{ ...order, status: "SUBMITTED", version: "10" }],
+    });
+    expect(late.orders["O-1"]?.status).toBe("FILLED");
+
+    const staleGeneration = uiReducer(filled, {
+      type: "lookupOrders",
+      generation: 2,
+      journalEpoch: "8123",
+      orders: [{ ...order, status: "CANCELED", version: "99" }],
+    });
+    expect(staleGeneration.orders["O-1"]?.status).toBe("FILLED");
+  });
+
+  it("does not apply an out-of-order event's view", () => {
+    const state = uiReducer(bootstrapped(), {
+      type: "journal",
+      event: event({
+        seq: "4819",
+        eventId: "8123:4819",
+        view: {
+          position: {
+            strategyId: "S-1",
+            instrumentId: "AAPL.GOX",
+            quantity: "999",
+            cost: "1",
+            reservedQuantity: "0",
+          },
+        },
+      }),
+    });
+    expect(state.positions).toEqual([]);
+    expect(state.sync.inconsistent).toBe(true);
   });
 
   it("blocks trading when the policy gate or writable state is closed", () => {

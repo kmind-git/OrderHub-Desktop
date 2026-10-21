@@ -515,6 +515,10 @@ pub struct RequestRecordDto {
     pub last_lookup_at: Option<String>,
     pub lookup_attempts: u32,
     pub client_order_id: Option<String>,
+    /// Local monotonic merge revision. Added after schema v1; older records
+    /// deserialize as 0 and are upgraded on their next write.
+    #[serde(default)]
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -536,6 +540,7 @@ pub struct CancelOrderResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderLookupResult {
+    pub generation: u64,
     pub orders: Vec<OrderViewDto>,
     pub journal_epoch: String,
     pub state_cursor: String,
@@ -579,15 +584,20 @@ pub struct PolicyGateDto {
 }
 
 impl PolicyGateDto {
-    pub fn not_configured() -> Self {
+    pub fn not_configured(development_build: bool) -> Self {
         Self {
             status: "not_configured".into(),
-            can_trade: true,
+            can_trade: development_build,
             min_supported_version: None,
             effective_at: None,
             revision: None,
             valid_until: None,
-            reason: "更新服务未配置，最低版本策略在本开发构建中未启用。".into(),
+            reason: if development_build {
+                "更新服务未配置；当前是开发构建，最低版本策略未启用。".into()
+            } else {
+                "更新服务未配置或配置无效；正式构建在取得有效策略前关闭新增报单。查询、诊断和服务端允许的撤单仍可用。"
+                    .into()
+            },
         }
     }
 }
@@ -718,12 +728,25 @@ pub struct DiagnosticsSummary {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RequestRecoveryDto {
+    pub ready: bool,
+    pub loading: bool,
+    pub total: usize,
+    pub unknown: usize,
+    pub load_errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BootstrapState {
     pub app: AppInfo,
     pub config: ConfigSummary,
     pub connection: ConnectionState,
     pub update: UpdateStateDto,
+    /// Only a bounded recent window. The requests page loads the full list
+    /// on demand via `list_requests`.
     pub requests: Vec<RequestRecordDto>,
+    pub request_recovery: RequestRecoveryDto,
     pub diagnostics: DiagnosticsSummary,
 }
 
@@ -731,4 +754,5 @@ pub struct BootstrapState {
 #[serde(rename_all = "camelCase")]
 pub struct ListRequestsResult {
     pub records: Vec<RequestRecordDto>,
+    pub recovery: RequestRecoveryDto,
 }

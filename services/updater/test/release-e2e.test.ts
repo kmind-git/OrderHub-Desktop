@@ -43,6 +43,7 @@ describe("release tool → update service end-to-end", () => {
       serveArtifacts: true,
       verifyArtifactUrl: false,
       allowInsecureArtifactUrl: true,
+      signingPublicKey: null,
       eventRetentionDays: 30,
       policyDefaultValidForSeconds: 3600,
       supportUrl: null,

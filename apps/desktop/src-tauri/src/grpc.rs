@@ -7,6 +7,7 @@ use crate::dto::{
 use crate::error::{grpc_error, AppResult};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
 use tonic::Request;
@@ -84,12 +85,37 @@ async fn get_state(
     settings: &ConnectionSettings,
     query: Query,
 ) -> AppResult<GetStateResponse> {
+    get_state_with_timeout(channel, settings, query, settings.rpc_timeout, None).await
+}
+
+async fn get_state_with_timeout(
+    channel: &Channel,
+    settings: &ConnectionSettings,
+    query: Query,
+    timeout: Duration,
+    cancel: Option<&CancellationToken>,
+) -> AppResult<GetStateResponse> {
     let mut client = OrderHubClient::new(channel.clone());
-    let request = unary_request(GetStateRequest { query: Some(query) }, settings)?;
-    let response = client
-        .get_state(request)
-        .await
-        .map_err(|status| grpc_error(&status, "native"))?;
+    let mut request = unary_request(GetStateRequest { query: Some(query) }, settings)?;
+    // Do not let a single page outlive the whole snapshot budget. The tonic
+    // request timeout is the per-attempt cap; the outer deadline is enforced
+    // here as well.
+    request.set_timeout(timeout.max(Duration::from_millis(1)));
+    let call = client.get_state(request);
+    let response = match cancel {
+        Some(cancel) => tokio::select! {
+            _ = cancel.cancelled() => {
+                return Err(IpcError::new(
+                    ErrorCategory::State,
+                    "SNAPSHOT_CANCELLED",
+                    "快照等待已取消",
+                ));
+            }
+            result = call => result,
+        },
+        None => call.await,
+    }
+    .map_err(|status| grpc_error(&status, "native"))?;
     Ok(response.into_inner())
 }
 
@@ -97,29 +123,54 @@ pub async fn fetch_snapshot(
     channel: &Channel,
     settings: &ConnectionSettings,
     generation: u64,
+    cancel: Option<&CancellationToken>,
 ) -> AppResult<SnapshotBaseline> {
+    let budget = Duration::from_secs(55);
+    let deadline = Instant::now() + budget;
     let mut last_error: Option<IpcError> = None;
     for attempt in 0..3 {
-        match fetch_snapshot_once(channel, settings, generation).await {
+        match fetch_snapshot_once(channel, settings, generation, deadline, cancel).await {
             Ok(snapshot) => return Ok(snapshot),
             Err(error) => {
                 if crate::error::is_auth_failure(&error) {
                     return Err(error);
                 }
+                let retryable = error.retryable;
                 last_error = Some(error);
-                tokio::time::sleep(Duration::from_millis(250 * (attempt + 1) as u64)).await;
+                if !retryable || attempt == 2 {
+                    break;
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                let delay = Duration::from_millis(250 * (attempt + 1) as u64).min(remaining);
+                sleep_or_cancel(delay, cancel).await;
             }
         }
     }
     Err(last_error.unwrap_or_else(|| transport_error("快照获取失败", true)))
 }
 
+async fn sleep_or_cancel(duration: Duration, cancel: Option<&CancellationToken>) {
+    match cancel {
+        Some(cancel) => {
+            tokio::select! {
+                _ = cancel.cancelled() => {}
+                _ = tokio::time::sleep(duration) => {}
+            }
+        }
+        None => tokio::time::sleep(duration).await,
+    }
+}
+
 async fn fetch_snapshot_once(
     channel: &Channel,
     settings: &ConnectionSettings,
     generation: u64,
+    deadline: Instant,
+    cancel: Option<&CancellationToken>,
 ) -> AppResult<SnapshotBaseline> {
-    let deadline = Instant::now() + Duration::from_secs(55);
     let mut page_token = String::new();
     let mut orders: Vec<OrderViewDto> = Vec::new();
     let mut order_index: HashMap<String, usize> = HashMap::new();
@@ -134,23 +185,35 @@ async fn fetch_snapshot_once(
     let mut last_page: Option<GetStateResponse> = None;
 
     for page in 0..12 {
-        if Instant::now() >= deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             return Err(IpcError::new(
                 ErrorCategory::State,
                 "SNAPSHOT_LEASE_EXPIRED",
-                "快照分页超过 60 秒租约，需要整份重取",
+                "快照分页超过 55 秒预算，需要整份重取",
             )
             .retryable(true));
         }
-        let response = get_state(
+        let per_page = remaining.min(settings.rpc_timeout);
+        let response = get_state_with_timeout(
             channel,
             settings,
             Query::Snapshot(SnapshotQuery {
                 page_size: 1000,
                 page_token: page_token.clone(),
             }),
+            per_page,
+            cancel,
         )
         .await?;
+        if Instant::now() >= deadline {
+            return Err(IpcError::new(
+                ErrorCategory::State,
+                "SNAPSHOT_LEASE_EXPIRED",
+                "快照在返回分页结果时已超过 55 秒预算，需要整份重取",
+            )
+            .retryable(true));
+        }
 
         if page == 0 {
             epoch = Some(response.journal_epoch.clone());
@@ -657,7 +720,7 @@ mod mock_tests {
             connect_timeout: Duration::from_secs(2),
             rpc_timeout: Duration::from_secs(2),
         };
-        let snapshot = fetch_snapshot(&channel, &settings, 7).await.unwrap();
+        let snapshot = fetch_snapshot(&channel, &settings, 7, None).await.unwrap();
         assert_eq!(snapshot.resume_token, "token-2");
         assert_eq!(snapshot.dto.generation, 7);
         assert_eq!(snapshot.dto.active_orders.len(), 2);
@@ -700,7 +763,7 @@ mod live_tests {
         let channel = build_channel(&settings)
             .await
             .expect("TLS connection must succeed");
-        let snapshot = fetch_snapshot(&channel, &settings, 1)
+        let snapshot = fetch_snapshot(&channel, &settings, 1, None)
             .await
             .expect("read-only Snapshot must succeed");
         assert!(!snapshot.dto.journal_epoch.is_empty());

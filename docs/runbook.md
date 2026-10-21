@@ -60,7 +60,9 @@ node app/dist/server.js
 - `ORDERHUB_UPDATER_PUBLIC_BASE_URL=https://updates.example.com/artifacts`；
 - `ORDERHUB_UPDATER_ADMIN_TOKEN` 为高熵随机值，只注入服务进程；
 - `ORDERHUB_UPDATER_SERVE_ARTIFACTS=0`，安装包由反向代理/文件服务提供；
-- `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1`，发布前 HEAD/GET 验证包可达；
+- `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1`，发布前下载最终包并核对大小、SHA-256、签名和签名版本；
+- `ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY` 必须是客户端 `tauri.conf.json` 中 updater `pubkey`
+  对应的 minisign 公钥（Base64 行）；缺失时发布会被拒绝；
 - 数据目录与安装包目录使用磁盘加密和 ACL，进程以低权限账号运行。
 
 受信内网没有 HTTPS 域名时，可以显式使用 IP + HTTP：
@@ -70,6 +72,8 @@ $env:ORDERHUB_UPDATER_HOST = '0.0.0.0'
 $env:ORDERHUB_UPDATER_PORT = '8787'
 $env:ORDERHUB_UPDATER_PUBLIC_BASE_URL = 'http://8.159.158.144:8787/artifacts'
 $env:ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL = '1'
+$env:ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL = '1'
+$env:ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY = '<minisign public key base64>'
 node app/dist/server.js
 ```
 
@@ -100,6 +104,7 @@ node app/dist/server.js
 pnpm --filter @orderhub/desktop tauri signer generate --ci `
   -w D:\secure\orderhub-prod.key
 # 将 .pub 内容填入 tauri.conf.json plugins.updater.pubkey；私钥离线保管
+# 同时把 .pub 的公钥 Base64 行配置为服务端 ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY
 ```
 
 3. 构建 NSIS + updater artifacts：
@@ -153,7 +158,8 @@ pnpm release policy --channel beta --revision 0 `
   --min-version 0.1.0 --valid-for-seconds 86400
 ```
 
-- 发布前服务会验证安装包 URL 可读（`VERIFY_ARTIFACT_URL=1`）。
+- 发布前服务会下载安装包，验证声明大小、SHA-256、minisign 签名和签名中的版本
+  （`VERIFY_ARTIFACT_URL=1` + `SIGNING_PUBLIC_KEY`）；任何不一致都会拒绝发布。
 - 最低版本策略要求存在已发布、兼容且版本 ≥ 最低版本的包，否则 409
   `MIN_VERSION_HAS_NO_UPGRADE_PATH`。
 - 策略 revision 必须与读取时一致，否则 409 `POLICY_REVISION_CONFLICT`。
@@ -182,7 +188,9 @@ updates 返回 204。
 | `RESYNC_REQUIRED` / `SLOW_CONSUMER` | 等待客户端重新 Snapshot；检查前端事件消费 |
 | 未知写结果 | 在请求记录查询原 request；`REQUEST_NOT_FOUND` 不代表未执行 |
 | `FORCED_UPDATE_UNAVAILABLE` | 立即人工安装可信包；不要继续交易 |
-| `ARTIFACT_UNREACHABLE` | 检查包目录、反向代理、URL、HEAD/Range 支持 |
+| `ARTIFACT_UNREACHABLE` | 检查包目录、反向代理、URL 和 GET 可达性 |
+| `ARTIFACT_SIZE_MISMATCH` / `ARTIFACT_DIGEST_MISMATCH` | 重新 staging，核对声明的 size/SHA-256 |
+| `INVALID_ARTIFACT_SIGNATURE` / `SIGNING_KEY_NOT_CONFIGURED` | 核对 `.sig`、签名版本和服务端公钥配置 |
 | `POLICY_CHANGED` | 客户端重新获取 policy；不要复用旧 release_id |
 | 更新安装失败 | 使用保留的可信安装包人工修复；MVP 不自动回退 |
 | 诊断导出失败 | 检查下载目录权限或 `%LOCALAPPDATA%\com.orderhub.desktop\exports` |

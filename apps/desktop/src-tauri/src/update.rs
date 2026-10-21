@@ -49,11 +49,23 @@ pub struct UpdatePolicyResponse {
     pub generated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct PolicyContext {
+    source: String,
+    application: String,
+    channel: String,
+    target: String,
+    arch: String,
+    installer: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct PolicyCache {
     schema_version: u32,
     fetched_at: String,
+    context: PolicyContext,
     policy: UpdatePolicyResponse,
 }
 
@@ -114,11 +126,27 @@ struct CachedPolicy {
     policy: UpdatePolicyResponse,
 }
 
+fn policy_context(config: &UpdateSettings) -> PolicyContext {
+    PolicyContext {
+        source: config
+            .base_url
+            .as_deref()
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_string(),
+        application: APPLICATION.to_string(),
+        channel: config.channel.clone(),
+        target: TARGET.to_string(),
+        arch: ARCH.to_string(),
+        installer: INSTALLER.to_string(),
+    }
+}
+
 pub struct UpdateManager {
     data_dir: PathBuf,
     installation_id: String,
     current_version: String,
-    config: UpdateSettings,
+    config: std::sync::RwLock<UpdateSettings>,
     http: reqwest::Client,
     state: Arc<Mutex<UpdateStateDto>>,
     cached_policy: Mutex<Option<CachedPolicy>>,
@@ -132,6 +160,7 @@ pub struct UpdateManager {
 const TARGET: &str = "windows";
 const ARCH: &str = "x86_64";
 const INSTALLER: &str = "nsis";
+const APPLICATION: &str = "com.orderhub.desktop";
 
 impl UpdateManager {
     pub fn new(
@@ -160,9 +189,10 @@ impl UpdateManager {
             Ok(_) => None,
             Err(_) => None,
         };
+        let context = policy_context(&config);
         let cached = read_json::<PolicyCache>(&data_dir.join("update-policy.json"))
             .ok()
-            .filter(|cache| cache.schema_version == 1)
+            .filter(|cache| cache.schema_version == 2 && cache.context == context)
             .map(|cache| CachedPolicy {
                 policy: cache.policy,
             });
@@ -175,7 +205,7 @@ impl UpdateManager {
             data_dir,
             installation_id,
             current_version: current_version.clone(),
-            config,
+            config: std::sync::RwLock::new(config),
             http: client,
             state: Arc::new(Mutex::new(UpdateStateDto {
                 configured: false,
@@ -184,7 +214,7 @@ impl UpdateManager {
                 phase: "idle".into(),
                 metadata: None,
                 download: None,
-                policy_gate: PolicyGateDto::not_configured(),
+                policy_gate: PolicyGateDto::not_configured(cfg!(debug_assertions)),
                 last_checked_at: None,
                 error: None,
                 message: startup_message.clone(),
@@ -196,19 +226,25 @@ impl UpdateManager {
             startup_marker: Mutex::new(startup_marker),
             operation: tokio::sync::Mutex::new(()),
         };
+        let settings = manager.settings();
         let gate = manager.policy_gate();
         manager.with_state(|state| {
-            state.configured = manager.config.configured;
-            state.channel = manager.config.channel.clone();
+            state.configured = settings.configured;
+            state.channel = settings.channel.clone();
             state.current_version = manager.current_version.clone();
-            state.phase = if manager.config.configured {
+            state.phase = if settings.configured {
                 "idle".into()
             } else {
                 "not_configured".into()
             };
             state.policy_gate = gate;
-            if !manager.config.configured {
-                state.message = Some("未配置更新服务地址；开发构建中最低版本策略未启用。".into());
+            if !settings.configured {
+                state.message = Some(if cfg!(debug_assertions) {
+                    "未配置更新服务地址；开发构建中最低版本策略未启用。".into()
+                } else {
+                    "未配置或无法读取有效的更新服务地址；正式构建在取得有效策略前关闭新增报单。"
+                        .into()
+                });
             }
         });
         manager
@@ -228,9 +264,76 @@ impl UpdateManager {
         self.with_state(|state| state.clone())
     }
 
+    fn settings(&self) -> UpdateSettings {
+        self.config
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+
+    /// Apply a reloaded `[update]` section without restarting the app.
+    ///
+    /// A different source or channel invalidates the cached policy, pending
+    /// release and downloaded bytes; otherwise a reload only refreshes the
+    /// flags that do not affect the artifact identity.
+    pub async fn reconfigure(&self, next: UpdateSettings) {
+        let _guard = self.operation.lock().await;
+        let previous = self.settings();
+        let identity_changed = previous.base_url != next.base_url
+            || previous.channel != next.channel
+            || previous.configured != next.configured;
+        *self
+            .config
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner()) = next.clone();
+        if identity_changed {
+            *self
+                .cached_policy
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = None;
+            *self
+                .pending
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = None;
+            *self
+                .downloaded
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = None;
+            *self
+                .forced_block
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = None;
+            let _ = std::fs::remove_file(self.data_dir.join("update-policy.json"));
+        }
+        self.with_state(|state| {
+            state.configured = next.configured;
+            state.channel = next.channel.clone();
+            if identity_changed {
+                state.phase = if next.configured {
+                    "idle".into()
+                } else {
+                    "not_configured".into()
+                };
+                state.metadata = None;
+                state.download = None;
+                state.error = None;
+                state.last_checked_at = None;
+                state.message = Some(if next.configured {
+                    "更新配置已重新读取，请重新检查更新。".into()
+                } else {
+                    "更新服务未配置；新增报单门禁取决于当前构建类型。".into()
+                });
+            }
+        });
+    }
+
     pub fn policy_gate(&self) -> PolicyGateDto {
-        if !self.config.configured {
-            return PolicyGateDto::not_configured();
+        let config = self.settings();
+        if !config.configured {
+            // Only an explicit development build may treat a missing or
+            // invalid update configuration as "trading allowed". A release
+            // build with a typo in the base URL must fail closed.
+            return PolicyGateDto::not_configured(cfg!(debug_assertions));
         }
         if let Some(reason) = self
             .forced_block
@@ -248,7 +351,7 @@ impl UpdateManager {
                 reason,
             };
         }
-        if !self.config.enforce_min_version {
+        if !config.enforce_min_version {
             return PolicyGateDto {
                 status: "valid".into(),
                 can_trade: true,
@@ -364,14 +467,14 @@ impl UpdateManager {
     }
 
     async fn fetch_policy(&self, correlation_id: &str) -> Result<UpdatePolicyResponse, IpcError> {
-        let base = self
-            .config
+        let config = self.settings();
+        let base = config
             .base_url
             .as_deref()
             .ok_or_else(|| update_error("UPDATE_NOT_CONFIGURED", "未配置更新服务地址"))?;
         let url = format!(
             "{base}/v1/update-policy/{}/{}/{}/{}?installer={}",
-            self.config.channel, TARGET, ARCH, self.current_version, INSTALLER
+            config.channel, TARGET, ARCH, self.current_version, INSTALLER
         );
         let response = self
             .http
@@ -434,8 +537,9 @@ impl UpdateManager {
     fn cache_policy(&self, policy: &UpdatePolicyResponse) {
         let fetched_at = chrono::Utc::now().to_rfc3339();
         let cache = PolicyCache {
-            schema_version: 1,
+            schema_version: 2,
             fetched_at: fetched_at.clone(),
+            context: policy_context(&self.settings()),
             policy: policy.clone(),
         };
         if let Err(error) = atomic_write_json(&self.data_dir.join("update-policy.json"), &cache) {
@@ -474,14 +578,14 @@ impl UpdateManager {
         expected_version: &str,
         correlation_id: &str,
     ) -> Result<Update, IpcError> {
-        let base = self
-            .config
+        let config = self.settings();
+        let base = config
             .base_url
             .as_deref()
             .ok_or_else(|| update_error("UPDATE_NOT_CONFIGURED", "未配置更新服务地址"))?;
         let endpoint = format!(
             "{base}/v1/updates/{}/{}/{}/{}?installer={}&release_id={}&policy_revision={}",
-            self.config.channel,
+            config.channel,
             TARGET,
             ARCH,
             self.current_version,
@@ -536,15 +640,15 @@ impl UpdateManager {
         revision: u64,
         correlation_id: &str,
     ) -> Result<EligibilityBody, IpcError> {
-        let base = self
-            .config
+        let config = self.settings();
+        let base = config
             .base_url
             .as_deref()
             .ok_or_else(|| update_error("UPDATE_NOT_CONFIGURED", "未配置更新服务地址"))?;
         let url = format!(
             "{base}/v1/releases/{}/eligibility?channel={}&target={}&arch={}&current_version={}&installer={}&policy_revision={}",
             urlencoding(release_id),
-            self.config.channel,
+            config.channel,
             TARGET,
             ARCH,
             self.current_version,
@@ -575,8 +679,68 @@ impl UpdateManager {
         })
     }
 
+    /// Fetch and apply only the minimum-version policy.
+    ///
+    /// This is intentionally separate from the updater metadata check so a
+    /// slow optional release endpoint cannot keep the trading gate in
+    /// "policy missing" after the policy itself is already valid.
+    pub async fn refresh_policy(&self) -> AppResult<UpdateStateDto> {
+        let config = self.settings();
+        if !config.configured {
+            self.with_state(|state| {
+                state.phase = "not_configured".into();
+                state.message = Some("未配置更新服务地址。".into());
+                state.error = None;
+            });
+            return Ok(self.current_state());
+        }
+        let _guard = self.operation.lock().await;
+        let correlation = uuid::Uuid::new_v4().to_string();
+        match self.fetch_policy(&correlation).await {
+            Ok(policy) => {
+                self.cache_policy(&policy);
+                *self
+                    .forced_block
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = None;
+                self.with_state(|state| {
+                    state.configured = true;
+                    state.channel = policy.channel.clone();
+                    state.error = None;
+                    state.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
+                    // Keep the prior phase (idle/available/ready); the gate is
+                    // the important output of this lightweight call.
+                    state.message = Some(format!(
+                        "最低版本策略已更新（revision {}）。",
+                        policy.policy_revision
+                    ));
+                });
+                Ok(self.current_state())
+            }
+            Err(error) => {
+                let is_forced_unavailable = error.code == "FORCED_UPDATE_UNAVAILABLE";
+                if is_forced_unavailable {
+                    *self
+                        .forced_block
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner()) = Some(error.message.clone());
+                }
+                self.with_state(|state| {
+                    state.error = Some(error.clone());
+                    state.message = Some(if is_forced_unavailable {
+                        "当前版本低于最低支持版本且没有可用升级包；请人工安装可信安装包。".into()
+                    } else {
+                        "更新策略获取失败，写入门禁保持原状态。".into()
+                    });
+                });
+                Ok(self.current_state())
+            }
+        }
+    }
+
     pub async fn check_update(&self, app: &AppHandle, _manual: bool) -> AppResult<UpdateStateDto> {
-        if !self.config.configured {
+        let config = self.settings();
+        if !config.configured {
             self.with_state(|state| {
                 state.phase = "not_configured".into();
                 state.message = Some("未配置更新服务地址。".into());
@@ -644,6 +808,33 @@ impl UpdateManager {
                 self.report_event("failure", Some(error.code.clone()));
                 return Ok(self.current_state());
             }
+            // A periodic check must not throw away an already verified
+            // download for the same artifact. A policy revision change only
+            // re-evaluates eligibility; the bytes are still valid.
+            let reusable = {
+                let pending = self
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                let downloaded = self
+                    .downloaded
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                pending
+                    .as_ref()
+                    .map(|current| {
+                        current.release_id == release.release_id
+                            && current.version == release.version
+                    })
+                    .unwrap_or(false)
+                    && downloaded.is_some()
+            };
+            if !reusable {
+                *self
+                    .downloaded
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = None;
+            }
             *self
                 .pending
                 .lock()
@@ -656,16 +847,16 @@ impl UpdateManager {
                 size: Some(release.size),
                 mandatory: policy.forced,
             });
-            *self
-                .downloaded
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner()) = None;
             self.with_state(|state| {
-                state.phase = "available".into();
+                state.phase = if reusable { "ready" } else { "available" }.into();
                 state.metadata = Some(metadata);
-                state.download = None;
+                if !reusable {
+                    state.download = None;
+                }
                 state.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
-                state.message = Some(if policy.forced {
+                state.message = Some(if reusable {
+                    "已下载的安装包仍符合当前策略，可直接安装。".into()
+                } else if policy.forced {
                     "存在必须安装的更新。".into()
                 } else {
                     "发现可用更新。".into()
@@ -694,6 +885,16 @@ impl UpdateManager {
         Ok(self.current_state())
     }
 
+    fn fail_update(&self, error: &IpcError, message: &str) {
+        self.with_state(|state| {
+            state.phase = "failed".into();
+            state.error = Some(error.clone());
+            state.message = Some(message.into());
+            state.download = None;
+        });
+        self.report_event("failure", Some(error.code.clone()));
+    }
+
     pub async fn download_update(
         &self,
         app: &AppHandle,
@@ -718,7 +919,7 @@ impl UpdateManager {
             });
         });
         self.report_event("download_started", None);
-        let update = self
+        let update = match self
             .updater_check(
                 app,
                 &pending.release_id,
@@ -726,7 +927,14 @@ impl UpdateManager {
                 &pending.version,
                 &correlation,
             )
-            .await?;
+            .await
+        {
+            Ok(update) => update,
+            Err(error) => {
+                self.fail_update(&error, "更新下载准备失败，可重试。");
+                return Err(error);
+            }
+        };
         let state = self.state.clone();
         let channel = progress.clone();
         let total = pending.size;
@@ -766,7 +974,9 @@ impl UpdateManager {
                 mapped
             })?;
         update.verify(&bytes).map_err(|error| {
-            update_error("UPDATE_VERIFY_FAILED", format!("更新包验签失败：{error}"))
+            let mapped = update_error("UPDATE_VERIFY_FAILED", format!("更新包验签失败：{error}"));
+            self.fail_update(&mapped, "更新包验签失败，已丢弃。");
+            mapped
         })?;
         if let Some(expected) = pending.size {
             if bytes.len() as u64 != expected {
@@ -774,10 +984,7 @@ impl UpdateManager {
                     "UPDATE_SIZE_MISMATCH",
                     format!("更新包大小 {} 与策略记录 {} 不一致", bytes.len(), expected),
                 );
-                self.with_state(|state| {
-                    state.phase = "failed".into();
-                    state.error = Some(error.clone());
-                });
+                self.fail_update(&error, "更新包大小与策略记录不一致，已丢弃。");
                 return Err(error);
             }
         }
@@ -957,10 +1164,11 @@ impl UpdateManager {
     }
 
     fn report_event(&self, stage: &str, error_category: Option<String>) {
-        if !self.config.configured {
+        let config = self.settings();
+        if !config.configured {
             return;
         }
-        let base = match self.config.base_url.clone() {
+        let base = match config.base_url.clone() {
             Some(base) => base,
             None => return,
         };
@@ -968,7 +1176,7 @@ impl UpdateManager {
             event_id: uuid::Uuid::new_v4().to_string(),
             installation_id: self.installation_id.clone(),
             app_version: self.current_version.clone(),
-            channel: self.config.channel.clone(),
+            channel: config.channel.clone(),
             target: TARGET.into(),
             arch: ARCH.into(),
             installer: INSTALLER.into(),
@@ -995,4 +1203,80 @@ fn urlencoding(value: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::UpdateSettings;
+
+    fn settings(channel: &str) -> UpdateSettings {
+        UpdateSettings {
+            configured: true,
+            base_url: Some("https://updates.example.com".into()),
+            channel: channel.into(),
+            auto_check: true,
+            auto_download: false,
+            enforce_min_version: true,
+            allow_insecure_loopback: false,
+            allow_insecure_http: false,
+            check_interval_secs: 3600,
+        }
+    }
+
+    fn cache_for(config: &UpdateSettings) -> PolicyCache {
+        PolicyCache {
+            schema_version: 2,
+            fetched_at: "2026-10-21T00:00:00Z".into(),
+            context: policy_context(config),
+            policy: UpdatePolicyResponse {
+                policy_revision: 7,
+                channel: config.channel.clone(),
+                target: TARGET.into(),
+                arch: ARCH.into(),
+                installer: INSTALLER.into(),
+                current_version: "0.1.2".into(),
+                min_supported_version: Some("0.1.0".into()),
+                min_supported_effective_at: None,
+                valid_until: "2099-01-01T00:00:00Z".into(),
+                forced: false,
+                update_available: false,
+                selected_release: None,
+                manual_install_required: false,
+                manual_install_url: None,
+                generated_at: "2026-10-21T00:00:00Z".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn policy_cache_is_bound_to_source_and_channel() {
+        let dir = tempfile::tempdir().unwrap();
+        let beta = settings("beta");
+        atomic_write_json(&dir.path().join("update-policy.json"), &cache_for(&beta)).unwrap();
+        let manager = UpdateManager::new(
+            dir.path().to_path_buf(),
+            "installation".into(),
+            "0.1.2".into(),
+            settings("stable"),
+        );
+        // A beta policy must not gate a stable client as if it were current.
+        let gate = manager.policy_gate();
+        assert_eq!(gate.status, "missing");
+        assert!(!gate.can_trade);
+
+        let manager = UpdateManager::new(
+            dir.path().to_path_buf(),
+            "installation".into(),
+            "0.1.2".into(),
+            settings("beta"),
+        );
+        assert_eq!(manager.policy_gate().status, "valid");
+    }
+
+    #[test]
+    fn release_build_without_update_config_fails_closed() {
+        assert!(!PolicyGateDto::not_configured(false).can_trade);
+        assert!(PolicyGateDto::not_configured(true).can_trade);
+    }
 }

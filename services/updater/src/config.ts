@@ -12,6 +12,8 @@ export interface UpdaterConfig {
   serveArtifacts: boolean;
   verifyArtifactUrl: boolean;
   allowInsecureArtifactUrl: boolean;
+  /** Minisign/Tauri updater public key used to verify artifacts before publish. */
+  signingPublicKey: string | null;
   eventRetentionDays: number;
   policyDefaultValidForSeconds: number;
   supportUrl: string | null;
@@ -63,6 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): UpdaterConfig 
     serveArtifacts,
     verifyArtifactUrl: bool(env.ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL, true),
     allowInsecureArtifactUrl: allowInsecure,
+    signingPublicKey: env.ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY?.trim() || null,
     eventRetentionDays: int(env.ORDERHUB_UPDATER_EVENT_RETENTION_DAYS, 30, 1, 365),
     policyDefaultValidForSeconds: int(env.ORDERHUB_UPDATER_POLICY_VALID_SECONDS, 86400, 300, 7 * 24 * 3600),
     supportUrl: env.ORDERHUB_UPDATER_SUPPORT_URL?.trim() || null,

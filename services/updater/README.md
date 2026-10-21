@@ -32,7 +32,8 @@ node dist/server.js
 | `ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL` | 显式允许非回环 HTTP 包地址（仅受信内网） |
 | `ORDERHUB_UPDATER_ADMIN_TOKEN` | 管理 API Bearer Token；未配置时管理接口 503 |
 | `ORDERHUB_UPDATER_APP_ID` | 应用标识，默认 `com.orderhub.desktop` |
-| `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL` | 发布前检查包 URL 可读，默认 1 |
+| `ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL` | 发布前下载最终包并核对大小、SHA-256 与签名，默认 1 |
+| `ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY` | minisign 公钥 Base64；`VERIFY_ARTIFACT_URL=1` 时发布必需 |
 | `ORDERHUB_UPDATER_SERVE_ARTIFACTS` | 是否由 Hono 静态提供 `/artifacts` |
 | `ORDERHUB_UPDATER_POLICY_VALID_SECONDS` | 无 policy 或新建 policy 的默认有效期 |
 | `ORDERHUB_UPDATER_EVENT_RETENTION_DAYS` | 更新事件留存天数 |

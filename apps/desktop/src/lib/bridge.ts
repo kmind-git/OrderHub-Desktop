@@ -12,9 +12,10 @@ import type {
   DownloadUpdateResult,
   InstallUpdateResult,
   IpcError,
+  ListRequestsResult,
   OrderLookupResult,
   RequestLookupResult,
-  RequestRecordDto,
+  RequestRecoveryDto,
   SessionEvent,
   SubmitOrderInput,
   SubmitOrderResult,
@@ -35,7 +36,9 @@ export interface Backend {
   submitOrder(input: SubmitOrderInput): Promise<SubmitOrderResult>;
   cancelOrder(input: CancelOrderInput): Promise<CancelOrderResult>;
   lookupSessionRequest(requestId: string): Promise<RequestLookupResult>;
-  listRequests(): Promise<RequestRecordDto[]>;
+  listRequests(): Promise<ListRequestsResult>;
+  getRequestRecovery(): Promise<RequestRecoveryDto>;
+  checkUpdatePolicy(): Promise<UpdateStateDto>;
   checkUpdate(manual: boolean): Promise<UpdateCheckResult>;
   downloadUpdate(onProgress: (progress: DownloadProgressDto) => void): Promise<DownloadUpdateResult>;
   installUpdate(confirmUnknownRequests: boolean): Promise<InstallUpdateResult>;
@@ -95,7 +98,16 @@ const unavailableBackend: Backend = {
     throw error("DESKTOP_RUNTIME_REQUIRED", "桌面运行时不可用");
   },
   async listRequests() {
-    return [];
+    return {
+      records: [],
+      recovery: { ready: true, loading: false, total: 0, unknown: 0, loadErrors: [] },
+    };
+  },
+  async getRequestRecovery() {
+    return { ready: true, loading: false, total: 0, unknown: 0, loadErrors: [] };
+  },
+  async checkUpdatePolicy() {
+    throw error("DESKTOP_RUNTIME_REQUIRED", "桌面运行时不可用");
   },
   async checkUpdate() {
     throw error("DESKTOP_RUNTIME_REQUIRED", "桌面运行时不可用");
@@ -137,10 +149,9 @@ const tauriBackend: Backend = {
   cancelOrder: (input) => invoke<CancelOrderResult>("cancel_order", { input }),
   lookupSessionRequest: (requestId) =>
     invoke<RequestLookupResult>("lookup_session_request", { requestId }),
-  async listRequests() {
-    const result = await invoke<{ records: RequestRecordDto[] }>("list_requests");
-    return result.records;
-  },
+  listRequests: () => invoke<ListRequestsResult>("list_requests"),
+  getRequestRecovery: () => invoke<RequestRecoveryDto>("get_request_recovery"),
+  checkUpdatePolicy: () => invoke<UpdateStateDto>("check_update_policy"),
   checkUpdate: (manual) => invoke<UpdateCheckResult>("check_update", { input: { manual } }),
   downloadUpdate(onProgress) {
     const channel = new Channel<DownloadProgressDto>();

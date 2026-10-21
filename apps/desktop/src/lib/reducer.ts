@@ -12,6 +12,7 @@ import type {
   OrderViewDto,
   PositionViewDto,
   RequestRecordDto,
+  RequestRecoveryDto,
   SnapshotDto,
   UpdateStateDto,
 } from "@orderhub/contracts";
@@ -51,6 +52,7 @@ export interface UiState {
   events: JournalEventDto[];
   executions: ExecutionFactDto[];
   requests: RequestRecordDto[];
+  requestRecovery: RequestRecoveryDto | null;
   update: UpdateStateDto | null;
   diagnostics: DiagnosticsSummary | null;
   sync: SyncState;
@@ -65,10 +67,17 @@ export type UiAction =
   | { type: "journal"; event: JournalEventDto }
   | { type: "resync"; generation: number; reason: string; message: string }
   | { type: "requests"; records: RequestRecordDto[] }
+  | { type: "requestRecovery"; recovery: RequestRecoveryDto }
   | { type: "requestUpsert"; record: RequestRecordDto }
   | { type: "update"; update: UpdateStateDto }
   | { type: "downloadProgress"; progress: import("@orderhub/contracts").DownloadProgressDto }
-  | { type: "lookupOrders"; orders: OrderViewDto[] }
+  | { type: "downloadFailed"; error: IpcError }
+  | {
+      type: "lookupOrders";
+      orders: OrderViewDto[];
+      generation: number;
+      journalEpoch: string;
+    }
   | { type: "diagnostics"; diagnostics: DiagnosticsSummary }
   | { type: "config"; config: ConfigSummary }
   | { type: "toast"; toast: ToastItem | null }
@@ -107,6 +116,7 @@ export function initialUiState(): UiState {
     events: [],
     executions: [],
     requests: [],
+    requestRecovery: null,
     update: null,
     diagnostics: null,
     sync: emptySync(),
@@ -141,6 +151,17 @@ function compareDecimalStrings(left: string, right: string): number | null {
   return leftBig === rightBig ? 0 : leftBig < rightBig ? -1 : 1;
 }
 
+/**
+ * Order `version` is an opaque exact integer string. A missing or malformed
+ * version is treated as "cannot prove newer", so the caller keeps the current
+ * view instead of letting a late lookup move an order backwards.
+ */
+function isNotOlder(incoming: string, current: string | undefined): boolean {
+  if (current === undefined) return true;
+  const comparison = compareDecimalStrings(incoming, current);
+  return comparison === null ? false : comparison >= 0;
+}
+
 function upsertPosition(list: PositionViewDto[], position: PositionViewDto): PositionViewDto[] {
   const index = list.findIndex(
     (item) =>
@@ -165,18 +186,30 @@ function upsertAccount(list: AccountViewDto[], account: AccountViewDto): Account
 export function uiReducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
     case "bootstrap": {
+      // A retried bootstrap can resolve after a newer session was already
+      // established. Never let its older generation replace the live one.
+      const connection =
+        action.bootstrap.connection.generation < state.connection.generation
+          ? state.connection
+          : action.bootstrap.connection;
       return {
         ...state,
         bootstrap: action.bootstrap,
         config: action.bootstrap.config,
-        connection: action.bootstrap.connection,
+        connection,
         requests: action.bootstrap.requests,
+        requestRecovery: action.bootstrap.requestRecovery,
         update: action.bootstrap.update,
         diagnostics: action.bootstrap.diagnostics,
       };
     }
     case "connection": {
       const nextGeneration = action.connection.generation;
+      // Messages from an old connection can arrive after a reconnect. A lower
+      // generation is always stale and must never replace the active session.
+      if (nextGeneration < state.connection.generation) {
+        return state;
+      }
       const generationChanged =
         state.connection.generation > 0 && nextGeneration !== state.connection.generation;
       if (!generationChanged) {
@@ -197,6 +230,11 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       };
     }
     case "snapshot": {
+      // A snapshot belongs to exactly one session generation. Ignore a late
+      // response from the session that was replaced while it was in flight.
+      if (action.snapshot.generation !== state.connection.generation) {
+        return state;
+      }
       const activeOrders: Record<string, OrderViewDto> = {};
       for (const order of action.snapshot.activeOrders) {
         activeOrders[order.clientOrderId] = order;
@@ -262,29 +300,37 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       let positions = state.positions;
       let accounts = state.accounts;
       let connection = state.connection;
-      if (event.view?.order) {
-        orders = { ...orders, [event.view.order.clientOrderId]: event.view.order };
-      }
-      if (event.view?.position) {
-        positions = upsertPosition(positions, event.view.position);
-      }
-      if (event.view?.account) {
-        accounts = upsertAccount(accounts, event.view.account);
-      }
       let snapshot = state.snapshot;
-      if (event.control) {
-        connection = {
-          ...connection,
-          readiness: event.control.readiness,
-          writable: event.control.writable,
-        };
-        // Control is the freshest committed service state; keep the snapshot
-        // projection in sync so gates never rely on a stale READY flag.
-        snapshot = {
-          ...snapshot,
-          readiness: event.control.readiness,
-          writable: event.control.writable,
-        };
+      // An out-of-order event is retained for diagnosis, but its views must
+      // not overwrite a newer projection. Previously the reducer only set the
+      // `inconsistent` flag and still applied the stale values.
+      if (!outOfOrder) {
+        if (event.view?.order) {
+          const current = orders[event.view.order.clientOrderId];
+          if (isNotOlder(event.view.order.version, current?.version)) {
+            orders = { ...orders, [event.view.order.clientOrderId]: event.view.order };
+          }
+        }
+        if (event.view?.position) {
+          positions = upsertPosition(positions, event.view.position);
+        }
+        if (event.view?.account) {
+          accounts = upsertAccount(accounts, event.view.account);
+        }
+        if (event.control) {
+          connection = {
+            ...connection,
+            readiness: event.control.readiness,
+            writable: event.control.writable,
+          };
+          // Control is the freshest committed service state; keep the snapshot
+          // projection in sync so gates never rely on a stale READY flag.
+          snapshot = {
+            ...snapshot,
+            readiness: event.control.readiness,
+            writable: event.control.writable,
+          };
+        }
       }
       const unknown = event.kind === "unknown";
       const events = [...state.events, event].slice(-240);
@@ -326,6 +372,8 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
     }
     case "requests":
       return { ...state, requests: action.records };
+    case "requestRecovery":
+      return { ...state, requestRecovery: action.recovery };
     case "requestUpsert": {
       const index = state.requests.findIndex(
         (record) => record.requestId === action.record.requestId,
@@ -347,10 +395,37 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
           download: action.progress,
         },
       };
+    case "downloadFailed":
+      if (!state.update) return state;
+      return {
+        ...state,
+        update: {
+          ...state.update,
+          phase: "failed",
+          download: null,
+          error: action.error,
+          message: "更新下载失败，可重试。",
+        },
+      };
     case "lookupOrders": {
       if (action.orders.length === 0) return state;
+      // A lookup is bound to the session that issued it. A result that lands
+      // after a reconnect (or after the journal epoch changed) is stale, even
+      // if the order view itself is newer than what the old session had.
+      if (
+        !state.snapshot ||
+        action.generation !== state.connection.generation ||
+        action.journalEpoch !== state.snapshot.journalEpoch
+      ) {
+        return state;
+      }
       const orders = { ...state.orders };
-      for (const order of action.orders) orders[order.clientOrderId] = order;
+      for (const order of action.orders) {
+        const current = orders[order.clientOrderId];
+        if (isNotOlder(order.version, current?.version)) {
+          orders[order.clientOrderId] = order;
+        }
+      }
       return { ...state, orders };
     }
     case "diagnostics":

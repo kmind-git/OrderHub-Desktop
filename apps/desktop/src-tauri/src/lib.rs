@@ -15,7 +15,7 @@ mod validation;
 
 use crate::config::{load_config, locate_config_dir};
 use crate::diagnostics::DiagnosticStore;
-use crate::dto::{AppInfo, ErrorCategory, IpcError};
+use crate::dto::AppInfo;
 use crate::requests::RequestStore;
 use crate::state::AppState;
 use crate::update::UpdateManager;
@@ -105,16 +105,12 @@ pub fn run() {
                     std::io::Error::other(format!("installation id failed: {error}"))
                 })?;
             let version = app.package_info().version.to_string();
-            let requests = RequestStore::open(&data_dir)
+            // Recovery is intentionally off the setup path: it can take
+            // seconds for a long-lived installation. Commands reject writes
+            // until the store reports ready, and bootstrap exposes progress.
+            let requests = RequestStore::open_background(&data_dir)
                 .map_err(|error| std::io::Error::other(format!("request store failed: {error}")))?;
             let diagnostics = DiagnosticStore::new();
-            for error in requests.load_errors() {
-                diagnostics.record(&IpcError::new(
-                    ErrorCategory::Storage,
-                    "REQUEST_RECORD_LOAD_FAILED",
-                    error,
-                ));
-            }
             let update = UpdateManager::new(
                 data_dir.clone(),
                 installation_id,
@@ -150,6 +146,8 @@ pub fn run() {
             commands::cancel_order,
             commands::lookup_session_request,
             commands::list_requests,
+            commands::get_request_recovery,
+            commands::check_update_policy,
             commands::check_update,
             commands::download_update,
             commands::install_update,

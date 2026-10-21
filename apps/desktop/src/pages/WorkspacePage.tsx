@@ -358,7 +358,7 @@ export function WorkspacePage({ navigate }: { navigate: (path: string) => void }
                 title="策略持仓"
                 subtitle="PositionView 是授权策略的内部账本投影，不等于外部确认持仓或可卖数量。"
               >
-                {snapshot.positions.length === 0 ? (
+                {state.positions.length === 0 ? (
                   <EmptyState
                     compact
                     icon="wallet"
@@ -379,7 +379,7 @@ export function WorkspacePage({ navigate }: { navigate: (path: string) => void }
                         </tr>
                       </thead>
                       <tbody>
-                        {snapshot.positions.map((position) => (
+                        {state.positions.map((position) => (
                           <tr key={`${position.strategyId}-${position.instrumentId}`}>
                             <td className="mono">{position.strategyId}</td>
                             <td>{position.instrumentId}</td>
@@ -400,7 +400,7 @@ export function WorkspacePage({ navigate }: { navigate: (path: string) => void }
                 title="授权策略资金占用"
                 subtitle="AccountView 是策略账本的已用现金和占用，不是全账户余额。"
               >
-                {snapshot.accounts.length === 0 ? (
+                {state.accounts.length === 0 ? (
                   <EmptyState
                     compact
                     icon="wallet"
@@ -408,7 +408,7 @@ export function WorkspacePage({ navigate }: { navigate: (path: string) => void }
                   />
                 ) : (
                   <div className="stack">
-                    {snapshot.accounts.map((account) => (
+                    {state.accounts.map((account) => (
                       <div
                         className="account-card"
                         key={`${account.accountId}-${account.strategyId}`}

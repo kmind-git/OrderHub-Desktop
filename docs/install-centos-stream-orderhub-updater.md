@@ -138,7 +138,13 @@ ORDERHUB_UPDATER_PUBLIC_BASE_URL=http://8.159.158.144:8787/artifacts
 ORDERHUB_UPDATER_ADMIN_TOKEN=<上一步生成的随机值>
 ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL=1
 ORDERHUB_UPDATER_SERVE_ARTIFACTS=1
+ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1
+ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=<tauri signer 生成的 minisign 公钥 Base64>
 ```
+
+`ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1` 时，发布前会下载最终安装包并核对声明大小、
+SHA-256、minisign 签名以及签名中的版本。缺少
+`ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY` 会拒绝发布，而不是只做一次 HEAD 可达性检查。
 
 模板默认使用 `/var/lib/orderhub-updater`，这里必须改成上面的
 `/home/orderhub-updater/data` 路径。
