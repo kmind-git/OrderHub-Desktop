@@ -465,7 +465,19 @@ SERVE=$(sed -n 's/^ORDERHUB_UPDATER_SERVE_ARTIFACTS=//p' "$CONFIG" | tail -n1 | 
 
 ### 10.2 上传安装包和 manifest
 
-本部署推荐把安装包放到服务自己的 `/artifacts` 下，不让更新服务依赖 GitHub 出网。
+目录先分清。安装包最终必须放到 `ARTIFACT_DIR`，manifest 只是登记用的输入，不对外提供：
+
+| 内容 | 最终路径（本部署默认） | 是否对外 |
+| --- | --- | --- |
+| 安装包（暂存） | `/home/orderhub-updater/OrderHub-Desktop_0.1.3_x64-setup.exe` | 否 |
+| 安装包（发布） | `/home/orderhub-updater/data/artifacts/0.1.3/windows-x86_64/OrderHub-Desktop_0.1.3_x64-setup.exe` | 是，经 `/artifacts/...` |
+| 原始 manifest | `/home/orderhub-updater/release-manifest.json` | 否 |
+| 改写 URL 的 manifest | `/home/orderhub-updater/release-manifest-0.1.3.local.json` | 否 |
+
+`ARTIFACT_DIR` 必须以服务器配置里的 `ORDERHUB_UPDATER_ARTIFACT_DIR` 为准。上面表格是当前部署的
+默认值；如果配置不同，10.3 会读取实际值，不要手工创建另一个目录。
+
+manifest 不要放进 `artifacts/`，也不需要被客户端下载。它只用于 `POST /v1/admin/releases`。
 
 在本地仓库目录执行（PowerShell）：
 
