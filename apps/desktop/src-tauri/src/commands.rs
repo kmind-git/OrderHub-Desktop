@@ -238,12 +238,16 @@ pub async fn connect(
         .lock()
         .unwrap_or_else(|poison| poison.into_inner()) = Some(shared.clone());
     let initial = shared.set_phase("connecting", Some("正在建立 TLS 连接".into()), None);
+    // Send the initial generation before the task can emit a snapshot. A
+    // snapshot that reaches the reducer before any status for its generation
+    // is deliberately ignored as stale, so ordering here is part of the
+    // generation contract.
+    let _ = events.send(SessionEvent::Status {
+        state: initial.clone(),
+    });
     let events_for_task = events.clone();
     tauri::async_runtime::spawn(async move {
         run_session(shared, events_for_task).await;
-    });
-    let _ = events.send(SessionEvent::Status {
-        state: initial.clone(),
     });
     Ok(initial)
 }
