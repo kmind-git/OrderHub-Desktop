@@ -59,11 +59,7 @@ v0.1.3 包含 2026-10-20 代码评审的状态一致性、请求恢复、发布�
 下载 `OrderHub-Updater-0.1.3-centos-stream.tar.gz`：
 
 ```bash
-tar -xzf OrderHub-Updater-0.1.3-centos-stream.tar.gz -C /opt/orderhub-updater
-cd /opt/orderhub-updater
-cp .env.example .env
-vi .env
-./start.sh
+tar -xzf OrderHub-Updater-0.1.3-centos-stream.tar.gz -C /home/orderhub-updater/app
 ```
 
 部署包包含自包含的 `dist/server.js`、`migrations/`、`.env.example`、`start.sh` 和
@@ -71,6 +67,10 @@ vi .env
 `0.0.0.0:8787`，健康检查 `/healthz`、`/readyz`。按你的
 `orderhub-updater` 用户和 `/home/orderhub-updater` 家目录整理的逐步安装文档见
 [CentOS Stream 安装步骤](docs/install-centos-stream-orderhub-updater.md)。
+
+现有 updater v0.1.2 只在 `/home/orderhub-updater` 下、仅用 `orderhub-updater` 用户升级时，
+按 [updater v0.1.2 → updater-v0.1.3 升级文档](docs/upgrade-updater-v0.1.2-to-v0.1.3-orderhub-user.md)
+执行；文档包含服务管理方式探测、无 root 文件操作、备份、回滚和失败停止条件。
 
 ## 快速开始
 
