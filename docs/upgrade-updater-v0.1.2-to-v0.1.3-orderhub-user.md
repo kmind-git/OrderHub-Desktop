@@ -16,6 +16,9 @@
 > `orderhub-updater` 的用户级 systemd unit，也没有管理员预先授予的免密重启权限，**停止升级并
 > 报告**，不要用 root 或 `pkill -f node` 绕过。
 
+以下 `BASE`、`APP`、`CONFIG`、`DATA`、`DB_PATH`、`MODE`、`BACKUP` 变量需要在同一个 shell
+会话中保留。每开一个新 shell，先重新执行对应变量定义。
+
 Agent 执行时必须遵守：
 
 1. 以下任一项失败立即停止，不继续覆盖：用户不是 `orderhub-updater`、`CONFIG` 不存在、
@@ -72,7 +75,11 @@ df -h "$BASE"
 ```bash
 MODE=unknown
 
-if systemctl --user cat orderhub-updater.service >/dev/null 2>&1; then
+if systemctl --user is-active --quiet orderhub-updater; then
+  MODE=user
+elif systemctl is-active --quiet orderhub-updater; then
+  MODE=system
+elif systemctl --user cat orderhub-updater.service >/dev/null 2>&1; then
   MODE=user
 elif systemctl cat orderhub-updater.service >/dev/null 2>&1; then
   MODE=system
@@ -81,7 +88,9 @@ elif pgrep -u "$(id -u)" -f 'dist/server.js' >/dev/null 2>&1; then
 fi
 
 echo "MODE=$MODE"
-[ "$MODE" = "manual" ] && pgrep -u "$(id -u)" -af 'dist/server.js'
+if [ "$MODE" = "manual" ]; then
+  pgrep -u "$(id -u)" -af 'dist/server.js'
+fi
 ```
 
 按 `MODE` 选择重启方式：
@@ -167,14 +176,20 @@ sha256sum OrderHub-Updater-0.1.3-centos-stream.tar.gz
 
 ```bash
 systemctl --user stop orderhub-updater
-systemctl --user is-active orderhub-updater || true
+if systemctl --user is-active --quiet orderhub-updater; then
+  echo "still active; stop and report"
+  exit 1
+fi
 ```
 
 ### 3.2 系统级 systemd（仅限已授权免密 sudo）
 
 ```bash
 sudo -n systemctl stop orderhub-updater
-systemctl is-active orderhub-updater || true
+if systemctl is-active --quiet orderhub-updater; then
+  echo "still active; stop and report"
+  exit 1
+fi
 ```
 
 没有免密授权时不要执行这一节。
@@ -203,6 +218,18 @@ ss -lntp | grep ':8787' || echo "8787 free"
 
 只备份程序、配置和数据库；`data/artifacts` 是不可变安装包，不需要整目录复制。
 
+先从现有配置读取数据库路径，必须是绝对路径：
+
+```bash
+DB_PATH=$(sed -n 's/^ORDERHUB_UPDATER_DB=//p' "$CONFIG" | tail -n1)
+echo "DB_PATH=$DB_PATH"
+case "$DB_PATH" in
+  /*) ;;
+  *) echo "ORDERHUB_UPDATER_DB is not absolute; stop and report"; exit 1 ;;
+esac
+test -f "$DB_PATH" || { echo "database not found; stop and report"; exit 1; }
+```
+
 ```bash
 STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="$BASE/backup-$STAMP"
@@ -210,16 +237,20 @@ mkdir -p "$BACKUP"
 
 cp -a "$APP" "$BACKUP/app"
 cp -a "$CONFIG" "$BACKUP/orderhub-updater.env"
-cp -a "$DATA/updater.sqlite3" "$BACKUP/updater.sqlite3"
-[ -f "$DATA/updater.sqlite3-wal" ] && cp -a "$DATA/updater.sqlite3-wal" "$BACKUP/"
-[ -f "$DATA/updater.sqlite3-shm" ] && cp -a "$DATA/updater.sqlite3-shm" "$BACKUP/"
+cp -a "$DB_PATH" "$BACKUP/$(basename "$DB_PATH")"
+if [ -f "$DB_PATH-wal" ]; then
+  cp -a "$DB_PATH-wal" "$BACKUP/$(basename "$DB_PATH")-wal"
+fi
+if [ -f "$DB_PATH-shm" ]; then
+  cp -a "$DB_PATH-shm" "$BACKUP/$(basename "$DB_PATH")-shm"
+fi
 
 echo "$BACKUP" > "$BASE/last-upgrade-backup.txt"
 ls -l "$BACKUP"
 ```
 
-如果数据库路径不是 `$DATA/updater.sqlite3`，以 `$CONFIG` 里的
-`ORDERHUB_UPDATER_DB` 为准，不要猜。
+不要改动 `ORDERHUB_UPDATER_DB` 或 `ORDERHUB_UPDATER_ARTIFACT_DIR`。`data/artifacts` 是不可变
+安装包，不复制。
 
 ## 5. 解压新程序
 
@@ -236,7 +267,7 @@ ls -l "$APP/dist/server.js"
 ```bash
 test -f "$APP/dist/server.js"
 test -f "$CONFIG"
-test -f "$DATA/updater.sqlite3"
+test -f "$DB_PATH"
 ```
 
 ## 6. 修改现有配置
@@ -244,13 +275,17 @@ test -f "$DATA/updater.sqlite3"
 只追加/替换两个键，保留数据库路径、安装包路径、端口、admin token 和其他现有配置。
 
 ```bash
-grep -q '^ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=' "$CONFIG" \
-  && sed -i 's|^ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=.*|ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1|' "$CONFIG" \
-  || echo 'ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1' >> "$CONFIG"
+if grep -q '^ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=' "$CONFIG"; then
+  sed -i 's|^ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=.*|ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1|' "$CONFIG"
+else
+  echo 'ORDERHUB_UPDATER_VERIFY_ARTIFACT_URL=1' >> "$CONFIG"
+fi
 
-grep -q '^ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=' "$CONFIG" \
-  && sed -i 's|^ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=.*|ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=RWRtAgrMQPWrFtbBoKP7cyFHWFGbcWblw9XI6gsbRDZ5W37wqu/CeQw6|' "$CONFIG" \
-  || echo 'ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=RWRtAgrMQPWrFtbBoKP7cyFHWFGbcWblw9XI6gsbRDZ5W37wqu/CeQw6' >> "$CONFIG"
+if grep -q '^ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=' "$CONFIG"; then
+  sed -i 's|^ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=.*|ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=RWRtAgrMQPWrFtbBoKP7cyFHWFGbcWblw9XI6gsbRDZ5W37wqu/CeQw6|' "$CONFIG"
+else
+  echo 'ORDERHUB_UPDATER_SIGNING_PUBLIC_KEY=RWRtAgrMQPWrFtbBoKP7cyFHWFGbcWblw9XI6gsbRDZ5W37wqu/CeQw6' >> "$CONFIG"
+fi
 ```
 
 检查不重复、值正确：
