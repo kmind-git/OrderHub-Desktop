@@ -91,7 +91,24 @@ echo "MODE=$MODE"
 if [ "$MODE" = "manual" ]; then
   pgrep -u "$(id -u)" -af 'dist/server.js'
 fi
+
+# 如果使用 systemd，确认 unit 仍然指向当前目录和配置；不一致就停止。
+if [ "$MODE" = "user" ]; then
+  systemctl --user cat orderhub-updater.service | grep -E '^(WorkingDirectory|EnvironmentFile|ExecStart)='
+elif [ "$MODE" = "system" ]; then
+  systemctl cat orderhub-updater.service | grep -E '^(WorkingDirectory|EnvironmentFile|ExecStart)='
+fi
 ```
+
+预期包含：
+
+```text
+WorkingDirectory=/home/orderhub-updater/app
+EnvironmentFile=/home/orderhub-updater/config/orderhub-updater.env
+ExecStart=/usr/bin/node /home/orderhub-updater/app/dist/server.js
+```
+
+路径不一致时不要继续，先修正 unit 或改用对应的实际路径。
 
 按 `MODE` 选择重启方式：
 
@@ -99,17 +116,12 @@ fi
 | --- | --- |
 | `MODE=user` | `systemctl --user restart orderhub-updater` |
 | `MODE=system` 且管理员已授权该用户免密重启 | 仅 `sudo -n systemctl restart orderhub-updater` 这一条使用 sudo |
+| `MODE=system` 但没有免密授权 | **停止升级，报告给有权限的人** |
 | `MODE=manual` | 第 3.3 节和 7.3 节的 kill/启动方式 |
 | `MODE=unknown` | **停止升级，报告给有权限的人** |
 
-检查免密 sudo 时不要触发密码提示：
-
-```bash
-sudo -n true 2>/dev/null && echo "passwordless sudo ok" || echo "no passwordless sudo"
-```
-
-`sudo -n true` 成功不代表有权重启 unit；最终以实际 restart 命令是否成功为准。没有授权就不要
-执行 sudo。
+不要用 `sudo -n true` 推断是否有权管理 unit；权限可能只授予了特定 systemctl 命令。第 3.2 节
+会直接尝试停止，失败就立即退出，不会继续覆盖文件。没有授权时不要执行 sudo。
 
 如果 `systemctl --user` 报 “Failed to connect to bus”，先确认当前会话有用户级 systemd：
 
@@ -185,7 +197,10 @@ fi
 ### 3.2 系统级 systemd（仅限已授权免密 sudo）
 
 ```bash
-sudo -n systemctl stop orderhub-updater
+sudo -n systemctl stop orderhub-updater || {
+  echo "cannot stop system service without permission; stop and report"
+  exit 1
+}
 if systemctl is-active --quiet orderhub-updater; then
   echo "still active; stop and report"
   exit 1
@@ -198,7 +213,10 @@ fi
 
 ```bash
 PID=$(pgrep -u "$(id -u)" -f 'dist/server.js' | head -n1)
-test -n "$PID" && echo "PID=$PID"
+test -n "$PID" || { echo "server process not found; stop"; exit 1; }
+echo "PID=$PID cwd=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || echo unknown)"
+CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || true)
+[ "$CWD" = "$APP" ] || { echo "PID cwd is not $APP; stop and report"; exit 1; }
 kill -TERM "$PID"
 
 for i in $(seq 1 20); do
@@ -309,7 +327,10 @@ systemctl --user status orderhub-updater --no-pager
 ### 7.2 系统级 systemd（仅限已授权免密 sudo）
 
 ```bash
-sudo -n systemctl restart orderhub-updater
+sudo -n systemctl restart orderhub-updater || {
+  echo "service restart failed; run rollback"
+  exit 1
+}
 systemctl status orderhub-updater --no-pager
 ```
 
@@ -433,6 +454,11 @@ API=http://127.0.0.1:8787
 TOKEN=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}ORDERHUB_UPDATER_ADMIN_TOKEN=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
 test -n "$TOKEN" || { echo "admin token missing; stop and report"; exit 1; }
 echo "admin token loaded (not printed)"
+
+# 静态目录必须由服务提供；HTTP artifact 的显式开关在 10.3 检查。
+ALLOW=$(sed -n 's/^ORDERHUB_UPDATER_ALLOW_INSECURE_ARTIFACT_URL=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
+SERVE=$(sed -n 's/^ORDERHUB_UPDATER_SERVE_ARTIFACTS=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
+[ "$SERVE" = "1" ] || { echo "SERVE_ARTIFACTS is not 1; stop"; exit 1; }
 ```
 
 不要把 `$TOKEN` 写进日志、命令历史或聊天记录。
@@ -476,6 +502,13 @@ echo "installer sha256 ok"
 ARTIFACT_DIR=$(sed -n 's/^ORDERHUB_UPDATER_ARTIFACT_DIR=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
 PUBLIC_BASE=$(sed -n 's/^ORDERHUB_UPDATER_PUBLIC_BASE_URL=//p' "$CONFIG" | tail -n1 | tr -d '\r"')
 PUBLIC_BASE=${PUBLIC_BASE%/}
+test -n "$ARTIFACT_DIR" || { echo "ARTIFACT_DIR missing; stop"; exit 1; }
+test -n "$PUBLIC_BASE" || { echo "PUBLIC_BASE_URL missing; stop"; exit 1; }
+case "$PUBLIC_BASE" in
+  http://*)
+    [ "$ALLOW" = "1" ] || { echo "ALLOW_INSECURE_ARTIFACT_URL is not 1; stop"; exit 1; }
+    ;;
+esac
 echo "ARTIFACT_DIR=$ARTIFACT_DIR"
 echo "PUBLIC_BASE=$PUBLIC_BASE"
 ```
@@ -534,10 +567,10 @@ if (m.version !== "0.1.3" || a.size !== 8737252 || a.sha256 !== "3a05fe398a6b0c2
 服务端发布时会通过 `ARTIFACT_URL` 下载并校验这个安装包。确认该 URL 能从服务器访问：
 
 ```bash
-curl -fsSI "$ARTIFACT_URL" | head
+curl -fsS -o /dev/null "$ARTIFACT_URL"
 ```
 
-如果这里 404/403，先修复静态路径或 `PUBLIC_BASE_URL`，不要继续发布。
+如果这里 404/403/超时，先修复静态路径或 `PUBLIC_BASE_URL`，不要继续发布。
 
 ### 10.4 登记 release
 
@@ -685,7 +718,14 @@ if (!p.update_available || !p.selected_release || p.selected_release.version !==
 
 ### 10.8 客户端操作
 
-已安装的 0.1.2 客户端配置应为：
+在客户端机器先确认已安装版本和 `client.toml`，不要假设配置已经正确：
+
+```powershell
+(Get-Item "D:\Program Files (x86)\OrderHub Desktop\orderhub-desktop.exe").VersionInfo.ProductVersion
+Get-Content "D:\Program Files (x86)\OrderHub Desktop\config\client.toml"
+```
+
+如果安装目录不同，以实际目录为准。`[update]` 至少应为：
 
 ```toml
 [update]
@@ -695,6 +735,19 @@ auto_check = true
 auto_download = false
 allow_insecure_http = true
 ```
+
+`base_url`、`channel` 或 `allow_insecure_http` 不一致时，先修改客户端配置并重启客户端，
+否则服务端即使已经选中 0.1.3，客户端也不会命中。
+
+在客户端机器确认能访问更新服务和安装包 URL：
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://8.159.158.144:8787/readyz
+Invoke-WebRequest -UseBasicParsing -Method Head `
+  "http://8.159.158.144:8787/artifacts/0.1.3/windows-x86_64/OrderHub-Desktop_0.1.3_x64-setup.exe"
+```
+
+如果客户端不能访问安装包 URL，即使策略显示有更新，下载也会失败。
 
 操作：
 
